@@ -12,16 +12,32 @@ const GUIDANCE_META: Record<NextBestAction['talkListenGuidance'], { label: strin
   pause:  { label: 'Pause',      icon: '⏸️', color: '#94a3b8' },
 };
 
+const ACTION_TYPE_LABELS: Record<NextBestAction['actionType'], string> = {
+  ask_question: 'Ask Another Question',
+  handle_objection: 'Handle Objection',
+  build_rapport: 'Build Rapport',
+  transition: 'Transition',
+  trial_close: 'Trial Close',
+  close_now: 'Close Now',
+  present_product: 'Present Product',
+  stop_talking: 'Stop Talking',
+};
+
 export function NextBestActionPanel({ action }: Props) {
   const guidance = GUIDANCE_META[action.talkListenGuidance];
 
   return (
     <div className="rounded-xl p-3 space-y-3 border" style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Next Best Action</p>
-        <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${guidance.color}1a`, color: guidance.color }}>
-          {guidance.icon} {guidance.label}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/8 text-slate-200">
+            {ACTION_TYPE_LABELS[action.actionType]}
+          </span>
+          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${guidance.color}1a`, color: guidance.color }}>
+            {guidance.icon} {guidance.label}
+          </span>
+        </div>
       </div>
 
       {action.nextQuestion && (

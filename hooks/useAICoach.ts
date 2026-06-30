@@ -37,6 +37,8 @@ const DEFAULT_INSIGHT: CoachInsight = {
   closeOpportunityPct: 0,
   emotionalOpportunities: [],
   urgency: 'low',
+  missedQuestions: [],
+  familyReferences: [],
   memoryUpdates: null,
 };
 
@@ -73,6 +75,64 @@ export function useAICoach(transcript: TranscriptLine[]) {
     memoryRef.current = memory;
   }, [memory]);
 
+  const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
+    if (!rawInsight) return;
+    if (rawInsight.memoryUpdates) {
+      setMemory((prev) => mergeMemory(prev, rawInsight.memoryUpdates as Partial<CallMemory>));
+    }
+    // Normalize defensively: the model may omit a field on a given turn
+    // (e.g. no objection currently active) — fill gaps with neutral
+    // defaults rather than letting downstream panels see `undefined`.
+    setInsight((prev) => ({
+      ...DEFAULT_INSIGHT,
+      ...rawInsight,
+      buyingSignals: (rawInsight.buyingSignals as string[]) ?? [],
+      buyingSignalDetails: (rawInsight.buyingSignalDetails as CoachInsight['buyingSignalDetails']) ?? [],
+      objectionAnalysis: (rawInsight.objectionAnalysis as CoachInsight['objectionAnalysis']) ?? null,
+      nextBestAction: (rawInsight.nextBestAction as CoachInsight['nextBestAction']) ?? prev.nextBestAction,
+      emotionalOpportunities: (rawInsight.emotionalOpportunities as string[]) ?? [],
+      alternativeResponses: (rawInsight.alternativeResponses as string[]) ?? [],
+      missedQuestions: (rawInsight.missedQuestions as string[]) ?? [],
+      familyReferences: (rawInsight.familyReferences as string[]) ?? [],
+    }));
+  }, []);
+
+  const applyMeta = useCallback((meta: { stage?: CallStage; underwriting?: Record<string, unknown>; checklist?: Record<string, boolean> }) => {
+    if (meta.stage) setStage(meta.stage);
+    if (meta.underwriting) {
+      setUnderwriting((prev) => {
+        const next = { ...prev };
+        const u = meta.underwriting!;
+        if (u.age)                next.age = u.age as string;
+        if (u.gender)             next.gender = u.gender as string;
+        if (u.heightFt)           next.heightFt = u.heightFt as string;
+        if (u.heightIn)           next.heightIn = u.heightIn as string;
+        if (u.weight)             next.weight = u.weight as string;
+        if (u.tobacco !== null && u.tobacco !== undefined)   next.tobacco = u.tobacco as boolean;
+        if (u.diabetes !== null && u.diabetes !== undefined)  next.diabetes = u.diabetes as boolean;
+        if (u.cancer !== null && u.cancer !== undefined)    next.cancer = u.cancer as boolean;
+        if (u.copd !== null && u.copd !== undefined)      next.copd = u.copd as boolean;
+        if (u.chf !== null && u.chf !== undefined)       next.chf = u.chf as boolean;
+        if (u.stroke !== null && u.stroke !== undefined)    next.stroke = u.stroke as boolean;
+        if (u.kidneyDisease !== null && u.kidneyDisease !== undefined) next.kidneyDisease = u.kidneyDisease as boolean;
+        if (u.oxygen !== null && u.oxygen !== undefined)    next.oxygen = u.oxygen as boolean;
+        if (u.walker !== null && u.walker !== undefined)    next.walker = u.walker as boolean;
+        if (u.wheelchair !== null && u.wheelchair !== undefined) next.wheelchair = u.wheelchair as boolean;
+        if (u.hospitalizations)   next.hospitalizations = u.hospitalizations as string;
+        if (u.currentMedications) next.currentMedications = u.currentMedications as string;
+        if (u.surgeries)          next.surgeries = u.surgeries as string;
+        setCarriers(matchCarriers(next));
+        return next;
+      });
+    }
+    if (meta.checklist) {
+      setChecklist((prev) => prev.map((item) => ({
+        ...item,
+        checked: item.checked || meta.checklist![item.id] === true,
+      })));
+    }
+  }, []);
+
   const analyze = useCallback(async (lines: TranscriptLine[]) => {
     if (lines.length === 0) return;
     if (lines.length === lastAnalyzedIdx.current) return;
@@ -91,72 +151,61 @@ export function useAICoach(transcript: TranscriptLine[]) {
         body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length, memory: memoryRef.current }),
       });
 
-      if (!res.ok) return;
-      const data = await res.json();
+      if (!res.ok || !res.body) return;
 
-      if (data.insight?.memoryUpdates) {
-        setMemory((prev) => mergeMemory(prev, data.insight.memoryUpdates));
-      }
+      // Real streaming consumption: read newline-delimited JSON frames as
+      // they arrive over the network (see app/api/coach/route.ts). We
+      // accumulate "delta" frames into the insight's raw JSON text and parse
+      // once it's complete (right before/at the "meta" frame) — deliberately
+      // not attempting field-by-field partial JSON parsing, which is fragile
+      // for a strict multi-field schema; the real latency win here is
+      // time-to-first-byte + total time, not a fake progressive reveal.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let insightText = '';
 
-      // Normalize defensively: the model may omit a field on a given turn
-      // (e.g. no objection currently active) — fill gaps with neutral
-      // defaults rather than letting downstream panels see `undefined`.
-      if (data.insight) {
-        setInsight((prev) => ({
-          ...DEFAULT_INSIGHT,
-          ...data.insight,
-          buyingSignals: data.insight.buyingSignals ?? [],
-          buyingSignalDetails: data.insight.buyingSignalDetails ?? [],
-          objectionAnalysis: data.insight.objectionAnalysis ?? null,
-          nextBestAction: data.insight.nextBestAction ?? prev.nextBestAction,
-          emotionalOpportunities: data.insight.emotionalOpportunities ?? [],
-          alternativeResponses: data.insight.alternativeResponses ?? [],
-        }));
-      }
-      if (data.stage) setStage(data.stage);
-      if (data.underwriting) {
-        setUnderwriting((prev) => {
-          const next = { ...prev };
-          const u = data.underwriting;
-          if (u.age)                next.age = u.age;
-          if (u.gender)             next.gender = u.gender;
-          if (u.heightFt)           next.heightFt = u.heightFt;
-          if (u.heightIn)           next.heightIn = u.heightIn;
-          if (u.weight)             next.weight = u.weight;
-          if (u.tobacco !== null)   next.tobacco = u.tobacco;
-          if (u.diabetes !== null)  next.diabetes = u.diabetes;
-          if (u.cancer !== null)    next.cancer = u.cancer;
-          if (u.copd !== null)      next.copd = u.copd;
-          if (u.chf !== null)       next.chf = u.chf;
-          if (u.stroke !== null)    next.stroke = u.stroke;
-          if (u.kidneyDisease !== null) next.kidneyDisease = u.kidneyDisease;
-          if (u.oxygen !== null)    next.oxygen = u.oxygen;
-          if (u.walker !== null)    next.walker = u.walker;
-          if (u.wheelchair !== null) next.wheelchair = u.wheelchair;
-          if (u.hospitalizations)   next.hospitalizations = u.hospitalizations;
-          if (u.currentMedications) next.currentMedications = u.currentMedications;
-          if (u.surgeries)          next.surgeries = u.surgeries;
-          setCarriers(matchCarriers(next));
-          return next;
-        });
-      }
-      if (data.checklist) {
-        setChecklist((prev) => prev.map((item) => ({
-          ...item,
-          checked: item.checked || (data.checklist[item.id] === true),
-        })));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line.trim()) continue;
+
+          try {
+            const frame = JSON.parse(line);
+            if (frame.t === 'delta') {
+              insightText += frame.d;
+            } else if (frame.t === 'meta') {
+              try { applyInsight(JSON.parse(insightText)); } catch { /* malformed — skip this turn */ }
+              applyMeta(frame);
+            } else if (frame.t === 'full') {
+              applyInsight(frame.insight);
+              applyMeta({ stage: frame.stage, underwriting: frame.underwriting, checklist: frame.checklist });
+            }
+          } catch {
+            // ignore malformed frame line
+          }
+        }
       }
     } catch {
       // network error — keep current insight
     } finally {
       setIsAnalyzing(false);
     }
-  }, []);
+  }, [applyInsight, applyMeta]);
 
-  // Debounce analysis — run 1.5s after a new transcript line arrives
+  // Debounce analysis — run shortly after a new transcript line arrives.
+  // Kept short (not zero) so rapid back-to-back utterances coalesce into one
+  // analysis call instead of firing one per word; the dominant latency cost
+  // is the model call itself, not this debounce window.
   const scheduleAnalysis = useCallback((lines: TranscriptLine[]) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => analyze(lines), 1500);
+    debounceRef.current = setTimeout(() => analyze(lines), 400);
   }, [analyze]);
 
   return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory };

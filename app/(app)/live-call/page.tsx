@@ -25,7 +25,7 @@ let timelineEventId = 0;
 export default function LiveCallPage() {
   const mic = useMicrophone();
   const {
-    transcript, connectionState, isListening, error,
+    transcript, partial, connectionState, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
   } = useRealtimeTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach(transcript);
@@ -37,6 +37,7 @@ export default function LiveCallPage() {
   const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'reminders' | 'memory'>('stage');
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [momentum, setMomentum] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef = useRef<number>(0);
@@ -44,6 +45,19 @@ export default function LiveCallPage() {
   const seenSignalCategoriesRef = useRef<Set<string>>(new Set());
   const seenStagesRef = useRef<Set<string>>(new Set());
   const readyForAppFiredRef = useRef(false);
+  const closeOpportunityHistoryRef = useRef<{ value: number; atMs: number }[]>([]);
+
+  // Momentum: real rate-of-change of closeOpportunityPct over the last ~15s
+  // of analysis history — never a fabricated value.
+  useEffect(() => {
+    const now = Date.now();
+    const history = closeOpportunityHistoryRef.current;
+    history.push({ value: insight.closeOpportunityPct, atMs: now });
+    while (history.length > 0 && now - history[0].atMs > 15000) history.shift();
+    if (history.length >= 2) {
+      setMomentum(history[history.length - 1].value - history[0].value);
+    }
+  }, [insight.closeOpportunityPct]);
 
   const pushTimelineEvent = useCallback((category: TimelineEventCategory, label: string) => {
     setTimeline((prev) => [
@@ -178,8 +192,10 @@ export default function LiveCallPage() {
     seenSignalCategoriesRef.current = new Set();
     seenStagesRef.current = new Set();
     readyForAppFiredRef.current = false;
+    closeOpportunityHistoryRef.current = [];
     setObjectionCount(0);
     setTimeline([]);
+    setMomentum(0);
 
     const stream = await mic.start();
     if (!stream) return; // mic.error already surfaces a real error to the UI
@@ -263,7 +279,7 @@ export default function LiveCallPage() {
 
         {/* LEFT — Transcript (35%) */}
         <div className="flex flex-col w-[35%] min-w-0">
-          <LiveTranscript lines={transcript} isListening={isListening} onCorrectSpeaker={correctSpeaker} />
+          <LiveTranscript lines={transcript} partial={partial} isListening={isListening} onCorrectSpeaker={correctSpeaker} />
         </div>
 
         {/* CENTER — AI Coach (32%) */}
@@ -303,6 +319,7 @@ export default function LiveCallPage() {
                   connectionScore={Math.round(metrics.connectionScore)}
                   energyScore={Math.round(metrics.energyScore)}
                   confidenceScore={Math.round(metrics.confidenceScore)}
+                  momentumScore={Math.round(momentum)}
                 />
               </div>
             )}

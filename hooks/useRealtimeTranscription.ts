@@ -7,8 +7,20 @@ import type { UseMicrophoneReturn } from '@/hooks/useMicrophone';
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 
+export interface PartialTranscript {
+  speaker: 'agent' | 'prospect';
+  text: string;
+}
+
 export interface UseRealtimeTranscriptionReturn {
   transcript: TranscriptLine[];
+  /**
+   * The in-progress utterance, if the Realtime API is emitting incremental
+   * transcription deltas for the current speech segment (real partial STT,
+   * not simulated) — null once finalized into `transcript` or when no
+   * partial event has arrived yet for the current utterance.
+   */
+  partial: PartialTranscript | null;
   connectionState: ConnectionState;
   isListening: boolean;
   error: string | null;
@@ -34,6 +46,7 @@ function nextId() { return `line-${++lineId}`; }
  */
 export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeTranscriptionReturn {
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [partial, setPartial] = useState<PartialTranscript | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -61,11 +74,22 @@ export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeT
       : { speaker: 'agent' as const, confidence: 30 };
 
     utteranceEnergyRef.current = { sum: 0, peak: 0, count: 0 };
+    setPartial(null);
 
     setTranscript((prev) => [
       ...prev,
       { id: nextId(), speaker, text: text.trim(), timestamp: new Date(), speakerConfidence: confidence },
     ]);
+  }, []);
+
+  // Best-effort speaker guess for the in-progress utterance, from energy
+  // accumulated so far — refined/finalized once the utterance completes.
+  const partialSpeaker = useCallback((): 'agent' | 'prospect' => {
+    const { sum, peak, count } = utteranceEnergyRef.current;
+    if (count === 0) return 'agent';
+    const avgEnergy = sum / count;
+    const classifier = classifierRef.current;
+    return classifier.isCalibrated() ? classifier.classify(avgEnergy, peak).speaker : 'agent';
   }, []);
 
   const teardownAudioPipeline = useCallback(() => {
@@ -162,9 +186,25 @@ export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeT
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+
+          // Real partial transcription — the Realtime API streams incremental
+          // deltas for the in-progress utterance before it finalizes. We show
+          // these as-is; we never synthesize a partial client-side.
+          if (msg.type === 'conversation.item.input_audio_transcription.delta' && typeof msg.delta === 'string') {
+            setPartial((prev) => ({
+              speaker: partialSpeaker(),
+              text: ((prev?.text ?? '') + msg.delta).trim(),
+            }));
+          }
+
+          if (msg.type === 'input_audio_buffer.speech_started') {
+            setPartial({ speaker: partialSpeaker(), text: '' });
+          }
+
           if (msg.type === 'conversation.item.input_audio_transcription.completed') {
             const text = msg.transcript?.trim();
             if (text) addLine(text);
+            else setPartial(null);
           }
           if (msg.type === 'error') {
             setError(msg.error?.message ?? 'Realtime API error');
@@ -198,7 +238,7 @@ export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeT
       setError(msg);
       setConnectionState('failed');
     }
-  }, [addLine, teardownAudioPipeline]);
+  }, [addLine, teardownAudioPipeline, partialSpeaker]);
 
   useEffect(() => {
     connectRef.current = connect;
@@ -219,10 +259,12 @@ export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeT
     wsRef.current?.close();
     wsRef.current = null;
     setConnectionState('idle');
+    setPartial(null);
   }, [teardownAudioPipeline]);
 
   const clearTranscript = useCallback(() => {
     setTranscript([]);
+    setPartial(null);
     lineId = 0;
   }, []);
 
@@ -238,6 +280,7 @@ export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeT
 
   return {
     transcript,
+    partial,
     connectionState,
     isListening: connectionState === 'connected' || connectionState === 'reconnecting',
     error,

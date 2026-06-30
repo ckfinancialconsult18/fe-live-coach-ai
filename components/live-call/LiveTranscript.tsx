@@ -2,21 +2,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { TranscriptLine } from '@/lib/types';
+import type { PartialTranscript } from '@/hooks/useRealtimeTranscription';
 
 interface Props {
   lines: TranscriptLine[];
+  partial?: PartialTranscript | null;
   isListening: boolean;
   onCorrectSpeaker?: (lineId: string) => void;
 }
 
-export function LiveTranscript({ lines, isListening, onCorrectSpeaker }: Props) {
+export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
     if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lines, autoScroll]);
+  }, [lines, partial, autoScroll]);
 
   const filtered = search
     ? lines.filter((l) => l.text.toLowerCase().includes(search.toLowerCase()))
@@ -95,6 +97,7 @@ export function LiveTranscript({ lines, isListening, onCorrectSpeaker }: Props) 
         {filtered.map((line) => (
           <TranscriptRow key={line.id} line={line} fmt={fmt} onCorrectSpeaker={onCorrectSpeaker} />
         ))}
+        {partial && partial.text && <PartialRow partial={partial} />}
         <div ref={bottomRef} />
       </div>
 
@@ -114,6 +117,28 @@ export function LiveTranscript({ lines, isListening, onCorrectSpeaker }: Props) 
             <span className="text-[10px] text-green-400 font-medium">Transcribing</span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PartialRow({ partial }: { partial: PartialTranscript }) {
+  const isAgent = partial.speaker === 'agent';
+  return (
+    <div className={`flex gap-3 ${isAgent ? '' : 'flex-row-reverse'}`}>
+      <div className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold opacity-50 ${
+        isAgent ? 'text-[#090d18]' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
+      }`} style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}>
+        {isAgent ? 'A' : 'P'}
+      </div>
+      <div className={`flex flex-col max-w-[85%] ${isAgent ? 'items-start' : 'items-end'}`}>
+        <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed italic text-slate-400 border border-dashed ${
+          isAgent ? 'border-[rgba(212,175,55,0.2)] rounded-tl-sm' : 'border-blue-500/15 rounded-tr-sm'
+        }`}>
+          {partial.text}
+          <span className="inline-block w-1 h-3 ml-0.5 bg-slate-500 animate-pulse align-middle" />
+        </div>
+        <span className="text-[10px] text-slate-700 mt-1 px-1">transcribing…</span>
       </div>
     </div>
   );

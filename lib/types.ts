@@ -49,7 +49,12 @@ export interface ObjectionAnalysis {
 }
 
 // ── Next Best Action Engine ─────────────────────────────────────────────────
+export type NextBestActionType =
+  | 'ask_question' | 'handle_objection' | 'build_rapport' | 'transition'
+  | 'trial_close' | 'close_now' | 'present_product' | 'stop_talking';
+
 export interface NextBestAction {
+  actionType: NextBestActionType;
   nextQuestion: string;
   nextResponse: string;
   nextClose: string;
@@ -76,6 +81,10 @@ export interface CoachInsight {
   closeOpportunityPct: number;
   emotionalOpportunities: string[];
   urgency: 'high' | 'medium' | 'low';
+  /** Questions the agent should have asked by this point in the call but hasn't (real-time detection, Phase 4). */
+  missedQuestions: string[];
+  /** References to spouse/children/grandchildren/family detected this turn (Phase 4). */
+  familyReferences: string[];
   /** Incremental mid-call memory facts extracted this turn (Part 7) — merge into persistent CallMemory, never overwrite with null/empty. */
   memoryUpdates: Partial<CallMemory> | null;
 }

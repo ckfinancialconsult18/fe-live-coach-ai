@@ -9,9 +9,11 @@ interface Props {
   connectionScore: number;
   energyScore: number;
   confidenceScore: number;
+  /** -100..100. Real rate-of-change of close opportunity over the last ~15s of analysis — positive means the call is gaining momentum toward a close, negative means it's losing it. */
+  momentumScore: number;
 }
 
-export function MetricsPanel({ talkPct, listenPct, sentimentScore, connectionScore, energyScore, confidenceScore }: Props) {
+export function MetricsPanel({ talkPct, listenPct, sentimentScore, connectionScore, energyScore, confidenceScore, momentumScore }: Props) {
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       {/* Talk vs Listen */}
@@ -42,6 +44,35 @@ export function MetricsPanel({ talkPct, listenPct, sentimentScore, connectionSco
         <ScoreBar label="Connection"  value={connectionScore} color="#D4AF37" />
         <ScoreBar label="Energy"      value={energyScore}     color="#06b6d4" />
         <ScoreBar label="Confidence"  value={confidenceScore} color="#a78bfa" />
+        <MomentumBar value={momentumScore} />
+      </div>
+    </div>
+  );
+}
+
+function MomentumBar({ value }: { value: number }) {
+  const isPositive = value > 5;
+  const isNegative = value < -5;
+  const color = isPositive ? '#22c55e' : isNegative ? '#ef4444' : '#94a3b8';
+  const pct = Math.min(100, Math.abs(value));
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-slate-500">Momentum</span>
+        <span className="text-[10px] font-bold flex items-center gap-1" style={{ color }}>
+          {isPositive ? '▲' : isNegative ? '▼' : '–'} {Math.abs(Math.round(value))}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/5 relative overflow-hidden">
+        <div
+          className="h-1.5 rounded-full transition-all duration-700 absolute"
+          style={{
+            width: `${pct / 2}%`,
+            background: color,
+            left: isNegative ? `${50 - pct / 2}%` : '50%',
+          }}
+        />
+        <div className="absolute left-1/2 top-0 w-px h-1.5 bg-white/20" />
       </div>
     </div>
   );
