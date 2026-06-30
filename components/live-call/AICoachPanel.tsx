@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useState } from 'react';
 import type { CoachInsight } from '@/lib/types';
+import { ObjectionEnginePanel } from './ObjectionEnginePanel';
+import { BuyingSignalEnginePanel } from './BuyingSignalEnginePanel';
+import { NextBestActionPanel } from './NextBestActionPanel';
 
 interface Props {
   insight: CoachInsight;
@@ -9,21 +12,28 @@ interface Props {
 }
 
 export function AICoachPanel({ insight, isAnalyzing }: Props) {
-  const prevObjectionRef = useRef<string | null>(null);
-  const key = insight.detectedObjection ?? 'idle';
+  const objectionQuote = insight.objectionAnalysis?.quote ?? insight.detectedObjection;
 
-  useEffect(() => {
-    prevObjectionRef.current = insight.detectedObjection;
-  }, [insight.detectedObjection]);
+  // Track the previously-rendered objection quote to detect a change, using
+  // React's documented "adjust state during render" pattern rather than an
+  // effect (avoids an extra render pass on every update).
+  const [renderedQuote, setRenderedQuote] = useState(objectionQuote);
+  const [objectionIsNew, setObjectionIsNew] = useState(false);
+  if (objectionQuote !== renderedQuote) {
+    setRenderedQuote(objectionQuote);
+    setObjectionIsNew(true);
+  } else if (objectionIsNew) {
+    setObjectionIsNew(false);
+  }
 
-  const changed = insight.detectedObjection !== prevObjectionRef.current;
-
-  const alertColor = insight.objectType === 'objection'
-    ? { bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)', text: '#ef4444', icon: '🔴', label: 'Objection Detected' }
-    : insight.objectType === 'buying_signal'
-    ? { bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)', text: '#22c55e', icon: '🟢', label: 'Buying Signal Detected' }
-    : insight.objectType === 'opportunity'
-    ? { bg: 'rgba(212,175,55,0.08)', border: 'rgba(212,175,55,0.25)', text: '#D4AF37', icon: '🟡', label: 'Opportunity' }
+  // Fallback alert (used only when the model returns a buying_signal /
+  // opportunity flag without a full structured objectionAnalysis).
+  const simpleAlert = !insight.objectionAnalysis && insight.detectedObjection
+    ? insight.objectType === 'buying_signal'
+      ? { bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)', text: '#22c55e', icon: '🟢', label: 'Buying Signal Detected' }
+      : insight.objectType === 'opportunity'
+      ? { bg: 'rgba(212,175,55,0.08)', border: 'rgba(212,175,55,0.25)', text: '#D4AF37', icon: '🟡', label: 'Opportunity' }
+      : null
     : null;
 
   return (
@@ -45,22 +55,27 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" key={key}>
-        {/* Alert Banner */}
-        {alertColor && insight.detectedObjection && (
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {/* Objection Engine */}
+        {insight.objectionAnalysis && (
+          <ObjectionEnginePanel objection={insight.objectionAnalysis} isNew={objectionIsNew} />
+        )}
+
+        {/* Fallback simple alert (buying_signal / opportunity flag with no structured objection) */}
+        {simpleAlert && insight.detectedObjection && (
           <div
-            className={`rounded-xl p-3 border ${changed ? 'animate-alert' : ''}`}
-            style={{ background: alertColor.bg, borderColor: alertColor.border }}
+            className={`rounded-xl p-3 border ${objectionIsNew ? 'animate-alert' : ''}`}
+            style={{ background: simpleAlert.bg, borderColor: simpleAlert.border }}
           >
             <div className="flex items-center gap-2 mb-2">
-              <span>{alertColor.icon}</span>
-              <span className="text-xs font-bold" style={{ color: alertColor.text }}>{alertColor.label}</span>
+              <span>{simpleAlert.icon}</span>
+              <span className="text-xs font-bold" style={{ color: simpleAlert.text }}>{simpleAlert.label}</span>
               <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
-                style={{ background: alertColor.bg, color: alertColor.text, border: `1px solid ${alertColor.border}` }}>
+                style={{ background: simpleAlert.bg, color: simpleAlert.text, border: `1px solid ${simpleAlert.border}` }}>
                 {insight.confidence}% confidence
               </span>
             </div>
-            <p className="text-sm text-slate-200 font-medium">"{insight.detectedObjection}"</p>
+            <p className="text-sm text-slate-200 font-medium">&quot;{insight.detectedObjection}&quot;</p>
           </div>
         )}
 
@@ -83,19 +98,32 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
           </div>
         </div>
 
-        {/* Recommended Response */}
-        <div className="glass-card rounded-xl p-3 space-y-2">
-          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Recommended Response</p>
-          <p className="text-sm text-slate-200 leading-relaxed">{insight.recommendedResponse}</p>
-          {insight.whyThisWorks && (
-            <div className="pt-1 border-t border-white/6">
-              <p className="text-[10px] text-slate-500 italic">💡 {insight.whyThisWorks}</p>
-            </div>
-          )}
-        </div>
+        {/* Next Best Action Engine */}
+        {insight.nextBestAction ? (
+          <NextBestActionPanel action={insight.nextBestAction} />
+        ) : (
+          <div className="rounded-xl p-3 space-y-1.5 border"
+            style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Next Best Question</p>
+            <p className="text-sm text-slate-200">&quot;{insight.nextBestQuestion}&quot;</p>
+          </div>
+        )}
+
+        {/* Recommended Response (only when no structured objection already shows one) */}
+        {!insight.objectionAnalysis && (
+          <div className="glass-card rounded-xl p-3 space-y-2">
+            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Recommended Response</p>
+            <p className="text-sm text-slate-200 leading-relaxed">{insight.recommendedResponse}</p>
+            {insight.whyThisWorks && (
+              <div className="pt-1 border-t border-white/6">
+                <p className="text-[10px] text-slate-500 italic">💡 {insight.whyThisWorks}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Alternatives */}
-        {insight.alternativeResponses.length > 0 && (
+        {!insight.objectionAnalysis && insight.alternativeResponses.length > 0 && (
           <div className="glass-card rounded-xl p-3 space-y-2">
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Alternative Responses</p>
             <div className="space-y-2">
@@ -109,27 +137,8 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
           </div>
         )}
 
-        {/* Next Best Question */}
-        <div className="rounded-xl p-3 space-y-1.5 border"
-          style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Next Best Question</p>
-          <p className="text-sm text-slate-200">"{insight.nextBestQuestion}"</p>
-        </div>
-
-        {/* Buying Signals */}
-        {insight.buyingSignals.length > 0 && (
-          <div className="glass-card rounded-xl p-3 space-y-2">
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Buying Signals</p>
-            <div className="space-y-1">
-              {insight.buyingSignals.map((s, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-green-400 text-xs mt-0.5">✓</span>
-                  <p className="text-xs text-slate-300">{s}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Buying Signal Engine */}
+        <BuyingSignalEnginePanel signals={insight.buyingSignalDetails} />
 
         {/* Emotional Opportunities */}
         {insight.emotionalOpportunities.length > 0 && (

@@ -1,4 +1,4 @@
-import type { UnderwritingProfile, CarrierMatch } from './types';
+import type { UnderwritingProfile, CarrierMatch, UnderwritingClass, DeclineRisk } from './types';
 
 interface CarrierRule {
   name: string;
@@ -68,21 +68,22 @@ export function matchCarriers(profile: UnderwritingProfile): CarrierMatch[] {
   if (isNaN(age)) return [];
 
   return RULES
-    .map((rule): CarrierMatch & { score: number } => {
+    .map((rule): CarrierMatch & { score: number; hitConditions: number } => {
       let score = 100;
+      let hitConditions = 0;
 
-      if (age < rule.minAge || age > rule.maxAge) return { ...dummyMatch(rule), score: 0 };
-      if (profile.tobacco === true && !rule.tobaccoOk) score -= 40;
-      if (profile.diabetes === true && !rule.diabetesOk) score -= 40;
+      if (age < rule.minAge || age > rule.maxAge) return { ...dummyMatch(rule), score: 0, hitConditions: 0 };
+      if (profile.tobacco === true && !rule.tobaccoOk) { score -= 40; hitConditions++; }
+      if (profile.diabetes === true && !rule.diabetesOk) { score -= 40; hitConditions++; }
 
       for (const cond of rule.cancelledConditions) {
-        if (profile[cond] === true) score -= 30;
+        if (profile[cond] === true) { score -= 30; hitConditions++; }
       }
 
-      if (profile.oxygen === true && !rule.cancelledConditions.includes('oxygen')) score -= 20;
-      if (profile.chf === true) score -= 15;
-      if (profile.cancer === true) score -= 20;
-      if (profile.stroke === true) score -= 15;
+      if (profile.oxygen === true && !rule.cancelledConditions.includes('oxygen')) { score -= 20; hitConditions++; }
+      if (profile.chf === true) { score -= 15; hitConditions++; }
+      if (profile.cancer === true) { score -= 20; hitConditions++; }
+      if (profile.stroke === true) { score -= 15; hitConditions++; }
 
       score = Math.max(0, score);
 
@@ -91,14 +92,44 @@ export function matchCarriers(profile: UnderwritingProfile): CarrierMatch[] {
         product: rule.product,
         confidence: score,
         notes: rule.notes,
+        underwritingClass: classifyUnderwritingClass(score),
+        declineRisk: classifyDeclineRisk(hitConditions),
         score,
+        hitConditions,
       };
     })
     .filter((m) => m.score > 30)
     .sort((a, b) => b.score - a.score)
-    .map(({ score: _s, ...m }) => m);
+    .map((m): CarrierMatch => ({
+      name: m.name,
+      product: m.product,
+      confidence: m.confidence,
+      notes: m.notes,
+      underwritingClass: m.underwritingClass,
+      declineRisk: m.declineRisk,
+    }));
+}
+
+function classifyUnderwritingClass(score: number): UnderwritingClass {
+  if (score >= 85) return 'preferred';
+  if (score >= 70) return 'standard';
+  if (score >= 50) return 'graded';
+  return 'modified';
+}
+
+function classifyDeclineRisk(hitConditions: number): DeclineRisk {
+  if (hitConditions === 0) return 'low';
+  if (hitConditions === 1) return 'medium';
+  return 'high';
 }
 
 function dummyMatch(rule: CarrierRule): CarrierMatch {
-  return { name: rule.name, product: rule.product, confidence: 0, notes: rule.notes };
+  return {
+    name: rule.name,
+    product: rule.product,
+    confidence: 0,
+    notes: rule.notes,
+    underwritingClass: 'guaranteed',
+    declineRisk: 'high',
+  };
 }

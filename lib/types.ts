@@ -25,6 +25,39 @@ export type CallStage =
   | 'objections'
   | 'close';
 
+// ── Buying Signal Engine ───────────────────────────────────────────────────
+export type BuyingSignalCategory =
+  | 'curiosity' | 'urgency' | 'financial_concern' | 'trust'
+  | 'hesitation' | 'agreement' | 'commitment' | 'confusion';
+
+export interface BuyingSignal {
+  category: BuyingSignalCategory;
+  quote: string;
+  confidence: number; // 0-100
+}
+
+// ── Objection Engine ────────────────────────────────────────────────────────
+export interface ObjectionAnalysis {
+  type: string;
+  quote: string;
+  confidence: number; // 0-100
+  whyItOccurred: string;
+  recommendedResponse: string;
+  alternateResponse: string;
+  followUpQuestion: string;
+  emotionalContext: string;
+}
+
+// ── Next Best Action Engine ─────────────────────────────────────────────────
+export interface NextBestAction {
+  nextQuestion: string;
+  nextResponse: string;
+  nextClose: string;
+  talkListenGuidance: 'speak' | 'listen' | 'pause';
+  readyForApplication: boolean;
+  readyForApplicationReason: string;
+}
+
 export interface CoachInsight {
   detectedObjection: string | null;
   objectType: 'objection' | 'buying_signal' | 'opportunity' | null;
@@ -34,6 +67,12 @@ export interface CoachInsight {
   whyThisWorks: string;
   nextBestQuestion: string;
   buyingSignals: string[];
+  /** Structured buying signals (Buying Signal Engine) — falls back to empty array if the model omits it. */
+  buyingSignalDetails: BuyingSignal[];
+  /** Structured objection analysis (Objection Engine) — null when no objection is currently active. */
+  objectionAnalysis: ObjectionAnalysis | null;
+  /** Next Best Action Engine output. */
+  nextBestAction: NextBestAction | null;
   closeOpportunityPct: number;
   emotionalOpportunities: string[];
   urgency: 'high' | 'medium' | 'low';
@@ -57,13 +96,19 @@ export interface UnderwritingProfile {
   wheelchair: boolean | null;
   hospitalizations: string;
   currentMedications: string;
+  surgeries: string;
 }
+
+export type UnderwritingClass = 'preferred' | 'standard' | 'graded' | 'modified' | 'guaranteed';
+export type DeclineRisk = 'low' | 'medium' | 'high';
 
 export interface CarrierMatch {
   name: string;
   product: string;
   confidence: number;
   notes: string;
+  underwritingClass: UnderwritingClass;
+  declineRisk: DeclineRisk;
 }
 
 export interface ChecklistItem {

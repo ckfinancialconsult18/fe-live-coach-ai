@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { formatDuration } from '@/lib/mock-calls';
+import { formatDuration } from '@/lib/format-duration';
 import type { CallRecord } from '@/lib/types';
 
 const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {

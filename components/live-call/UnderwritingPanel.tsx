@@ -1,6 +1,6 @@
 'use client';
 
-import type { UnderwritingProfile, CarrierMatch } from '@/lib/types';
+import type { UnderwritingProfile, CarrierMatch, UnderwritingClass, DeclineRisk } from '@/lib/types';
 
 interface Props {
   profile: UnderwritingProfile;
@@ -63,6 +63,9 @@ export function UnderwritingPanel({ profile, carriers }: Props) {
         {profile.currentMedications && (
           <TextRow label="Medications" value={profile.currentMedications} />
         )}
+        {profile.surgeries && (
+          <TextRow label="Surgeries" value={profile.surgeries} />
+        )}
 
         {!hasAnyData && (
           <p className="text-[10px] text-slate-600 text-center py-2">
@@ -70,6 +73,21 @@ export function UnderwritingPanel({ profile, carriers }: Props) {
           </p>
         )}
       </div>
+
+      {/* Best Carrier Recommendation */}
+      {carriers.length > 0 && (
+        <div className="glass-card rounded-xl p-3 space-y-1.5 border" style={{ borderColor: 'rgba(212,175,55,0.25)' }}>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Best Carrier Recommendation</p>
+            <span className="text-sm font-bold" style={{ color: confidenceColor(carriers[0].confidence) }}>{carriers[0].confidence}%</span>
+          </div>
+          <p className="text-sm font-semibold text-slate-200">{carriers[0].name} — {carriers[0].product}</p>
+          <div className="flex items-center gap-2">
+            <UnderwritingClassBadge value={carriers[0].underwritingClass} />
+            <DeclineRiskBadge value={carriers[0].declineRisk} />
+          </div>
+        </div>
+      )}
 
       {/* Carrier Matches */}
       <div className="glass-card rounded-xl p-3 space-y-2">
@@ -90,6 +108,10 @@ export function UnderwritingPanel({ profile, carriers }: Props) {
               <p className="text-xs font-semibold text-slate-200 truncate">{c.name}</p>
               <p className="text-[10px] text-slate-500 truncate">{c.product}</p>
               {c.notes && <p className="text-[9px] text-slate-600 truncate mt-0.5">{c.notes}</p>}
+              <div className="flex items-center gap-1.5 mt-1">
+                <UnderwritingClassBadge value={c.underwritingClass} />
+                <DeclineRiskBadge value={c.declineRisk} />
+              </div>
             </div>
             <div className="shrink-0 text-right">
               <p className="text-sm font-bold" style={{ color: confidenceColor(c.confidence) }}>
@@ -151,4 +173,45 @@ function confidenceColor(pct: number) {
   if (pct >= 75) return '#22c55e';
   if (pct >= 50) return '#D4AF37';
   return '#f59e0b';
+}
+
+const CLASS_LABELS: Record<UnderwritingClass, string> = {
+  preferred: 'Preferred',
+  standard: 'Standard',
+  graded: 'Graded',
+  modified: 'Modified',
+  guaranteed: 'Guaranteed Issue',
+};
+
+const CLASS_COLORS: Record<UnderwritingClass, string> = {
+  preferred: '#22c55e',
+  standard: '#06b6d4',
+  graded: '#D4AF37',
+  modified: '#f59e0b',
+  guaranteed: '#ef4444',
+};
+
+function UnderwritingClassBadge({ value }: { value: UnderwritingClass }) {
+  return (
+    <span
+      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border"
+      style={{ color: CLASS_COLORS[value], borderColor: `${CLASS_COLORS[value]}40`, background: `${CLASS_COLORS[value]}1a` }}
+    >
+      {CLASS_LABELS[value]}
+    </span>
+  );
+}
+
+const RISK_LABELS: Record<DeclineRisk, string> = { low: 'Low Decline Risk', medium: 'Medium Decline Risk', high: 'High Decline Risk' };
+const RISK_COLORS: Record<DeclineRisk, string> = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
+
+function DeclineRiskBadge({ value }: { value: DeclineRisk }) {
+  return (
+    <span
+      className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border"
+      style={{ color: RISK_COLORS[value], borderColor: `${RISK_COLORS[value]}40`, background: `${RISK_COLORS[value]}1a` }}
+    >
+      {RISK_LABELS[value]}
+    </span>
+  );
 }

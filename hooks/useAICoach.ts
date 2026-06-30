@@ -13,6 +13,9 @@ const DEFAULT_INSIGHT: CoachInsight = {
   whyThisWorks: 'Active listening builds trust and uncovers the real concern.',
   nextBestQuestion: 'Tell me a little more about what\'s most important to you about this coverage.',
   buyingSignals: [],
+  buyingSignalDetails: [],
+  objectionAnalysis: null,
+  nextBestAction: null,
   closeOpportunityPct: 0,
   emotionalOpportunities: [],
   urgency: 'low',
@@ -22,7 +25,7 @@ const DEFAULT_UNDERWRITING: UnderwritingProfile = {
   age: '', gender: '', heightFt: '', heightIn: '', weight: '',
   tobacco: null, diabetes: null, cancer: null, copd: null, chf: null,
   stroke: null, kidneyDisease: null, oxygen: null, walker: null, wheelchair: null,
-  hospitalizations: '', currentMedications: '',
+  hospitalizations: '', currentMedications: '', surgeries: '',
 };
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
@@ -67,7 +70,21 @@ export function useAICoach(transcript: TranscriptLine[]) {
       if (!res.ok) return;
       const data = await res.json();
 
-      if (data.insight) setInsight(data.insight);
+      // Normalize defensively: the model may omit a field on a given turn
+      // (e.g. no objection currently active) — fill gaps with neutral
+      // defaults rather than letting downstream panels see `undefined`.
+      if (data.insight) {
+        setInsight((prev) => ({
+          ...DEFAULT_INSIGHT,
+          ...data.insight,
+          buyingSignals: data.insight.buyingSignals ?? [],
+          buyingSignalDetails: data.insight.buyingSignalDetails ?? [],
+          objectionAnalysis: data.insight.objectionAnalysis ?? null,
+          nextBestAction: data.insight.nextBestAction ?? prev.nextBestAction,
+          emotionalOpportunities: data.insight.emotionalOpportunities ?? [],
+          alternativeResponses: data.insight.alternativeResponses ?? [],
+        }));
+      }
       if (data.stage) setStage(data.stage);
       if (data.underwriting) {
         setUnderwriting((prev) => {
@@ -90,6 +107,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
           if (u.wheelchair !== null) next.wheelchair = u.wheelchair;
           if (u.hospitalizations)   next.hospitalizations = u.hospitalizations;
           if (u.currentMedications) next.currentMedications = u.currentMedications;
+          if (u.surgeries)          next.surgeries = u.surgeries;
           setCarriers(matchCarriers(next));
           return next;
         });

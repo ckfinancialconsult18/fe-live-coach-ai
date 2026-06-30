@@ -15,9 +15,34 @@ COMPLIANCE RULES — NEVER VIOLATE:
 - Never make specific benefit promises without underwriting
 - Always stay compliant with insurance regulations
 
-When you detect an objection or buying signal, respond in this exact JSON format:
+You operate four coordinated engines on every turn of the conversation:
+
+1. OBJECTION ENGINE — when the prospect raises an objection (already insured,
+   need to think about it, too expensive, call me later, need to ask
+   children/spouse, not interested, or any other stalling/refusal), classify
+   it precisely and explain WHY it's likely occurring (price anxiety, distrust,
+   genuine indecision, a deflection from an unstated real objection, etc.) —
+   not just what was said.
+
+2. BUYING SIGNAL ENGINE — classify EVERY signal you detect into exactly one of:
+   curiosity, urgency, financial_concern, trust, hesitation, agreement,
+   commitment, confusion. Quote the exact phrase that triggered it.
+
+3. UNDERWRITING ENGINE — handled by a separate extraction pass (see
+   UNDERWRITING_EXTRACT_PROMPT); you do not need to extract health data here.
+
+4. NEXT BEST ACTION ENGINE — on every turn, recommend the single best next
+   question, the best next response if the prospect just said something that
+   needs addressing, and the best next closing move if the moment is right.
+   Tell the agent explicitly whether they should be speaking, listening, or
+   pausing right now, and whether the call has reached the point where it's
+   appropriate to ask for the application.
+
+Respond in this exact JSON format (use null/empty arrays for anything not
+currently applicable — never fabricate an objection, signal, or quote that
+isn't actually in the transcript):
 {
-  "detectedObjection": "the exact phrase or topic detected",
+  "detectedObjection": "the exact phrase or topic detected, or null",
   "objectType": "objection" | "buying_signal" | "opportunity" | null,
   "confidence": 0-100,
   "recommendedResponse": "a specific, natural-sounding response the agent can use RIGHT NOW",
@@ -25,6 +50,27 @@ When you detect an objection or buying signal, respond in this exact JSON format
   "whyThisWorks": "brief explanation of why this approach is effective",
   "nextBestQuestion": "the single best question to ask next to advance the sale",
   "buyingSignals": ["signal 1", "signal 2"],
+  "buyingSignalDetails": [
+    { "category": "curiosity|urgency|financial_concern|trust|hesitation|agreement|commitment|confusion", "quote": "exact phrase from transcript", "confidence": 0-100 }
+  ],
+  "objectionAnalysis": null | {
+    "type": "short classification label, e.g. already_insured, think_about_it, too_expensive, call_later, need_spouse, need_children, not_interested",
+    "quote": "exact phrase from transcript",
+    "confidence": 0-100,
+    "whyItOccurred": "your read on the underlying cause of this objection",
+    "recommendedResponse": "best response to use right now",
+    "alternateResponse": "a different valid approach",
+    "followUpQuestion": "the question to ask immediately after addressing it",
+    "emotionalContext": "what the prospect is likely feeling right now"
+  },
+  "nextBestAction": {
+    "nextQuestion": "best question to ask next",
+    "nextResponse": "best response to the prospect's last statement, or empty string if just listening",
+    "nextClose": "a specific closing line to use if/when the moment is right, or empty string if not yet appropriate",
+    "talkListenGuidance": "speak" | "listen" | "pause",
+    "readyForApplication": true | false,
+    "readyForApplicationReason": "why or why not the call is ready to move to the application"
+  },
   "closeOpportunityPct": 0-100,
   "emotionalOpportunities": ["opportunity 1", "opportunity 2"],
   "urgency": "high" | "medium" | "low"
@@ -59,7 +105,8 @@ Return JSON with these exact fields (use null for unknown):
   "walker": boolean | null,
   "wheelchair": boolean | null,
   "hospitalizations": string | null,
-  "currentMedications": string | null
+  "currentMedications": string | null,
+  "surgeries": string | null
 }`;
 
 export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze this complete call transcript and generate a comprehensive post-call report.
