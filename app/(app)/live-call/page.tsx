@@ -55,7 +55,7 @@ function PreflightPanel({ result, onDismiss }: { result: PreflightResult; onDism
 export default function LiveCallPage() {
   const mic = useMicrophone();
   const {
-    transcript, partial, connectionState, isListening, error,
+    transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
   } = useRealtimeTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach(transcript);
@@ -309,7 +309,7 @@ export default function LiveCallPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Mic controls bar */}
       <div className="flex items-center justify-between gap-3 px-5 py-2 border-b border-white/6 shrink-0">
-        <MicrophoneControls mic={mic} connectionState={connectionState} />
+        <MicrophoneControls mic={mic} connectionState={connectionState} transcriptionMode={transcriptionMode} />
         {autosave.callId && (
           <span className="text-[10px] text-slate-600 shrink-0">
             {autosave.lastSavedAt ? `Autosaved ${autosave.lastSavedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}` : 'Autosave starting…'}

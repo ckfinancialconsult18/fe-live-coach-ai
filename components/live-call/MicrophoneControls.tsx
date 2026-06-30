@@ -1,11 +1,12 @@
 'use client';
 
 import type { UseMicrophoneReturn } from '@/hooks/useMicrophone';
-import type { ConnectionState } from '@/hooks/useRealtimeTranscription';
+import type { ConnectionState, TranscriptionMode } from '@/hooks/useRealtimeTranscription';
 
 interface Props {
   mic: UseMicrophoneReturn;
   connectionState: ConnectionState;
+  transcriptionMode?: TranscriptionMode | null;
 }
 
 const HEALTH_LABEL: Record<string, { label: string; color: string }> = {
@@ -24,7 +25,7 @@ const CONNECTION_LABEL: Record<ConnectionState, { label: string; color: string }
   failed: { label: 'Connection failed', color: '#ef4444' },
 };
 
-export function MicrophoneControls({ mic, connectionState }: Props) {
+export function MicrophoneControls({ mic, connectionState, transcriptionMode }: Props) {
   // 12-segment level meter, derived directly from the real mic.level signal.
   const meterBars = Math.round(Math.min(1, mic.level * 6) * 12);
 
@@ -82,6 +83,25 @@ export function MicrophoneControls({ mic, connectionState }: Props) {
         <span className={`w-1.5 h-1.5 rounded-full ${connectionState === 'connected' ? 'animate-live' : ''}`} style={{ background: connection.color }} />
         {connection.label}
       </span>
+
+      {/* Transcription mode badge — only shown when active */}
+      {transcriptionMode && (
+        <span
+          className="text-[9px] font-bold px-2 py-0.5 rounded-full border"
+          style={
+            transcriptionMode === 'realtime'
+              ? { background: 'rgba(34,197,94,0.1)', color: '#22c55e', borderColor: 'rgba(34,197,94,0.25)' }
+              : { background: 'rgba(212,175,55,0.1)', color: '#D4AF37', borderColor: 'rgba(212,175,55,0.25)' }
+          }
+          title={
+            transcriptionMode === 'realtime'
+              ? 'Using OpenAI Realtime API for transcription'
+              : 'OpenAI Realtime unavailable — using browser Web Speech API (Chrome/Edge built-in)'
+          }
+        >
+          {transcriptionMode === 'realtime' ? 'OpenAI Realtime' : 'Web Speech API'}
+        </span>
+      )}
     </div>
   );
 }
