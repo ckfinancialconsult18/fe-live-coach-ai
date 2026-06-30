@@ -8,6 +8,10 @@ export interface TranscriptLine {
   text: string;
   timestamp: Date;
   sentiment?: 'positive' | 'neutral' | 'negative';
+  /** 0-100. Diarization confidence (heuristic energy-based classifier — see lib/audio/diarization.ts), not transcription confidence. */
+  speakerConfidence?: number;
+  /** True once the agent has manually corrected the auto-assigned speaker for this line. */
+  speakerEdited?: boolean;
 }
 
 export type CallStage =

@@ -1,53 +1,99 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { TranscriptLine, Speaker } from '@/lib/types';
+import type { TranscriptLine } from '@/lib/types';
+import { EnergyHeuristicClassifier } from '@/lib/audio/diarization';
+import type { UseMicrophoneReturn } from '@/hooks/useMicrophone';
+
+export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 
 export interface UseRealtimeTranscriptionReturn {
   transcript: TranscriptLine[];
-  isConnected: boolean;
+  connectionState: ConnectionState;
   isListening: boolean;
   error: string | null;
   startListening: () => Promise<void>;
   stopListening: () => void;
   clearTranscript: () => void;
+  correctSpeaker: (lineId: string) => void;
 }
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 1000;
 
 let lineId = 0;
 function nextId() { return `line-${++lineId}`; }
 
-export function useRealtimeTranscription(): UseRealtimeTranscriptionReturn {
+/**
+ * Streams microphone audio to OpenAI's Realtime transcription API and
+ * assigns each transcribed utterance to a speaker using the energy-based
+ * diarization heuristic (lib/audio/diarization.ts) rather than a fixed
+ * alternation. Requires a microphone stream from useMicrophone — this hook
+ * does not call getUserMedia itself, so device selection / level metering /
+ * health stay centralized in one place.
+ */
+export function useRealtimeTranscription(mic: UseMicrophoneReturn): UseRealtimeTranscriptionReturn {
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const contextRef = useRef<AudioContext | null>(null);
-  const speakerToggleRef = useRef<Speaker>('agent');
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const classifierRef = useRef(new EnergyHeuristicClassifier());
+  const utteranceEnergyRef = useRef<{ sum: number; peak: number; count: number }>({ sum: 0, peak: 0, count: 0 });
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldReconnectRef = useRef(false);
+  const micRef = useRef(mic);
+  const connectRef = useRef<() => Promise<void>>(async () => {});
 
-  const addLine = useCallback((speaker: Speaker, text: string) => {
+  useEffect(() => {
+    micRef.current = mic;
+  }, [mic]);
+
+  const addLine = useCallback((text: string) => {
+    const { sum, peak, count } = utteranceEnergyRef.current;
+    const avgEnergy = count > 0 ? sum / count : 0;
+    const classifier = classifierRef.current;
+    const { speaker, confidence } = classifier.isCalibrated()
+      ? classifier.classify(avgEnergy, peak)
+      : { speaker: 'agent' as const, confidence: 30 };
+
+    utteranceEnergyRef.current = { sum: 0, peak: 0, count: 0 };
+
     setTranscript((prev) => [
       ...prev,
-      { id: nextId(), speaker, text: text.trim(), timestamp: new Date() },
+      { id: nextId(), speaker, text: text.trim(), timestamp: new Date(), speakerConfidence: confidence },
     ]);
   }, []);
 
-  const startListening = useCallback(async () => {
+  const teardownAudioPipeline = useCallback(() => {
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+    sourceRef.current?.disconnect();
+    sourceRef.current = null;
+  }, []);
+
+  const connect = useCallback(async () => {
+    const currentMic = micRef.current;
+    if (!currentMic.stream || !currentMic.audioContext) {
+      setError('Microphone is not active');
+      setConnectionState('failed');
+      return;
+    }
+
+    setConnectionState(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
     setError(null);
+
     try {
-      // Get ephemeral session token from our server
       const res = await fetch('/api/session', { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to create session');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Failed to create transcription session');
+      }
       const { client_secret } = await res.json();
 
-      // Get microphone
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      streamRef.current = stream;
-
-      // Open WebSocket to OpenAI Realtime
       const ws = new WebSocket(
         'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
         ['realtime', `openai-insecure-api-key.${client_secret.value}`, 'openai-beta.realtime-v1']
@@ -55,10 +101,9 @@ export function useRealtimeTranscription(): UseRealtimeTranscriptionReturn {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setIsConnected(true);
-        setIsListening(true);
+        reconnectAttemptRef.current = 0;
+        setConnectionState('connected');
 
-        // Configure session for transcription only
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
@@ -73,22 +118,41 @@ export function useRealtimeTranscription(): UseRealtimeTranscriptionReturn {
           },
         }));
 
-        // Stream mic audio
-        const ctx = new AudioContext({ sampleRate: 24000 });
-        contextRef.current = ctx;
-        const source = ctx.createMediaStreamSource(stream);
+        const ctx = currentMic.audioContext!;
+        const source = ctx.createMediaStreamSource(currentMic.stream!);
         const processor = ctx.createScriptProcessor(4096, 1, 1);
+        sourceRef.current = source;
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
           const input = e.inputBuffer.getChannelData(0);
+
+          // Accumulate energy for the in-flight utterance (diarization signal).
+          let sumSquares = 0;
+          let peak = 0;
+          for (let i = 0; i < input.length; i++) {
+            const v = input[i];
+            sumSquares += v * v;
+            const abs = Math.abs(v);
+            if (abs > peak) peak = abs;
+          }
+          const rms = Math.sqrt(sumSquares / input.length);
+          const energy = utteranceEnergyRef.current;
+          energy.sum += rms;
+          energy.peak = Math.max(energy.peak, peak);
+          energy.count += 1;
+
+          if (!classifierRef.current.isCalibrated()) classifierRef.current.calibrate(rms);
+
+          if (ws.readyState !== WebSocket.OPEN) return;
           const pcm16 = new Int16Array(input.length);
           for (let i = 0; i < input.length; i++) {
             pcm16[i] = Math.max(-32768, Math.min(32767, Math.round(input[i] * 32767)));
           }
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-          ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 }));
+          let binary = '';
+          const bytes = new Uint8Array(pcm16.buffer);
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: btoa(binary) }));
         };
 
         source.connect(processor);
@@ -98,97 +162,88 @@ export function useRealtimeTranscription(): UseRealtimeTranscriptionReturn {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-
           if (msg.type === 'conversation.item.input_audio_transcription.completed') {
             const text = msg.transcript?.trim();
-            if (text) {
-              // Alternate speakers: first line is agent, then prospect, etc.
-              // In practice the agent can manually tag, but we auto-alternate for demo
-              const speaker = speakerToggleRef.current;
-              speakerToggleRef.current = speaker === 'agent' ? 'prospect' : 'agent';
-              addLine(speaker, text);
-            }
+            if (text) addLine(text);
           }
-
           if (msg.type === 'error') {
-            setError(msg.error?.message ?? 'WebSocket error');
+            setError(msg.error?.message ?? 'Realtime API error');
           }
         } catch {
-          // ignore parse errors
+          // ignore malformed frames
         }
       };
 
-      ws.onerror = () => setError('Connection error. Check microphone permissions.');
-      ws.onclose = () => {
-        setIsConnected(false);
-        setIsListening(false);
+      ws.onerror = () => {
+        setError('Connection error — check your network and microphone permissions.');
       };
 
+      ws.onclose = () => {
+        teardownAudioPipeline();
+        if (shouldReconnectRef.current && reconnectAttemptRef.current < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttemptRef.current += 1;
+          setConnectionState('reconnecting');
+          const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttemptRef.current - 1);
+          reconnectTimeoutRef.current = setTimeout(() => connectRef.current(), delay);
+        } else if (shouldReconnectRef.current) {
+          setConnectionState('failed');
+          setError('Lost connection to the transcription service after multiple attempts.');
+          shouldReconnectRef.current = false;
+        } else {
+          setConnectionState('idle');
+        }
+      };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
+      const msg = err instanceof Error ? err.message : 'Unknown error starting transcription';
       setError(msg);
-      // Fallback to demo mode if no API key configured
-      startDemoMode(addLine);
-      setIsListening(true);
-      setIsConnected(true);
+      setConnectionState('failed');
     }
-  }, [addLine]);
+  }, [addLine, teardownAudioPipeline]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
+  const startListening = useCallback(async () => {
+    shouldReconnectRef.current = true;
+    reconnectAttemptRef.current = 0;
+    classifierRef.current = new EnergyHeuristicClassifier();
+    await connect();
+  }, [connect]);
 
   const stopListening = useCallback(() => {
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-    contextRef.current?.close();
-    contextRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    shouldReconnectRef.current = false;
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    reconnectTimeoutRef.current = null;
+    teardownAudioPipeline();
     wsRef.current?.close();
     wsRef.current = null;
-    setIsListening(false);
-    setIsConnected(false);
-  }, []);
+    setConnectionState('idle');
+  }, [teardownAudioPipeline]);
 
   const clearTranscript = useCallback(() => {
     setTranscript([]);
     lineId = 0;
   }, []);
 
+  const correctSpeaker = useCallback((targetId: string) => {
+    setTranscript((prev) => prev.map((line) =>
+      line.id === targetId
+        ? { ...line, speaker: line.speaker === 'agent' ? 'prospect' : 'agent', speakerEdited: true }
+        : line
+    ));
+  }, []);
+
   useEffect(() => () => stopListening(), [stopListening]);
 
-  return { transcript, isConnected, isListening, error, startListening, stopListening, clearTranscript };
-}
-
-// ── Demo mode — simulates a real call for development / when no API key ───────
-
-function startDemoMode(addLine: (s: Speaker, t: string) => void) {
-  const script: [Speaker, string, number][] = [
-    ['agent',    'Hello, may I speak with Dorothy? This is Courtney calling from FE Financial.', 2000],
-    ['prospect', 'Yes, this is Dorothy. Who did you say you were with?', 3000],
-    ['agent',    'Hi Dorothy, I\'m Courtney with FE Financial. The reason I\'m calling is you recently filled out a card requesting information about final expense life insurance. Is that right?', 5000],
-    ['prospect', 'Oh yes, I did fill something out. I\'ve been meaning to look into that.', 3000],
-    ['agent',    'Perfect. Is now a good time to talk for just a few minutes?', 2500],
-    ['prospect', 'Sure, I have a few minutes. I\'m 68 years old and I do have a little bit of coverage but I\'m not sure if it\'s enough.', 5000],
-    ['agent',    'I understand. Can I ask what company your current coverage is with and how much you currently have?', 3500],
-    ['prospect', 'It\'s through AARP, I think I have about five thousand dollars worth. I pay around thirty dollars a month for it.', 4500],
-    ['agent',    'I see. And what made you feel that five thousand might not be quite enough?', 3000],
-    ['prospect', 'Well, funerals are so expensive these days. My neighbor just passed and it cost over twelve thousand dollars. I don\'t want to leave that burden on my kids.', 6000],
-    ['agent',    'That\'s such an important thing to think about, Dorothy. You mentioned you\'re 68 — are you in relatively good health? Do you have any major health conditions I should know about?', 4500],
-    ['prospect', 'I have type 2 diabetes, been managing it for about ten years with Metformin. Other than that I\'m pretty healthy. No heart problems or anything like that.', 5500],
-    ['agent',    'That\'s good to know. And are you a tobacco user at all?', 2000],
-    ['prospect', 'No, I quit smoking about fifteen years ago.', 2000],
-    ['agent',    'Wonderful. If I could show you a plan that would give you ten to fifteen thousand dollars in coverage for less than you\'re currently paying, would that be something worth taking a look at?', 4000],
-    ['prospect', 'That sounds almost too good to be true. How much would something like that cost?', 3000],
-    ['agent',    'For someone your age and health, you\'d be looking at right around twenty-five to thirty dollars a month for ten thousand dollars in coverage. That\'s actually less than what you\'re paying now for only five thousand.', 5000],
-    ['prospect', 'Wow. I\'d like to think about that. Can I call you back?', 2500],
-  ];
-
-  let i = 0;
-  function next() {
-    if (i >= script.length) return;
-    const [speaker, text, delay] = script[i++];
-    setTimeout(() => {
-      addLine(speaker, text);
-      next();
-    }, delay);
-  }
-  next();
+  return {
+    transcript,
+    connectionState,
+    isListening: connectionState === 'connected' || connectionState === 'reconnecting',
+    error,
+    startListening,
+    stopListening,
+    clearTranscript,
+    correctSpeaker,
+  };
 }

@@ -6,9 +6,10 @@ import type { TranscriptLine } from '@/lib/types';
 interface Props {
   lines: TranscriptLine[];
   isListening: boolean;
+  onCorrectSpeaker?: (lineId: string) => void;
 }
 
-export function LiveTranscript({ lines, isListening }: Props) {
+export function LiveTranscript({ lines, isListening, onCorrectSpeaker }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -92,7 +93,7 @@ export function LiveTranscript({ lines, isListening }: Props) {
         )}
 
         {filtered.map((line) => (
-          <TranscriptRow key={line.id} line={line} fmt={fmt} />
+          <TranscriptRow key={line.id} line={line} fmt={fmt} onCorrectSpeaker={onCorrectSpeaker} />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -118,19 +119,28 @@ export function LiveTranscript({ lines, isListening }: Props) {
   );
 }
 
-function TranscriptRow({ line, fmt }: { line: TranscriptLine; fmt: (d: Date) => string }) {
+function TranscriptRow({ line, fmt, onCorrectSpeaker }: {
+  line: TranscriptLine;
+  fmt: (d: Date) => string;
+  onCorrectSpeaker?: (lineId: string) => void;
+}) {
   const isAgent = line.speaker === 'agent';
+  const lowConfidence = line.speakerConfidence != null && line.speakerConfidence < 50;
   return (
     <div className={`flex gap-3 animate-fade-in ${isAgent ? '' : 'flex-row-reverse'}`}>
       {/* Avatar */}
-      <div className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold ${
-        isAgent
-          ? 'text-[#090d18]'
-          : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
-      }`}
-        style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}>
+      <button
+        onClick={() => onCorrectSpeaker?.(line.id)}
+        title="Click to correct speaker"
+        className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-transform hover:scale-110 ${
+          isAgent
+            ? 'text-[#090d18]'
+            : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
+        }`}
+        style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}
+      >
         {isAgent ? 'A' : 'P'}
-      </div>
+      </button>
 
       {/* Bubble */}
       <div className={`flex flex-col max-w-[85%] ${isAgent ? 'items-start' : 'items-end'}`}>
@@ -143,7 +153,15 @@ function TranscriptRow({ line, fmt }: { line: TranscriptLine; fmt: (d: Date) => 
         `}>
           {line.text}
         </div>
-        <span className="text-[10px] text-slate-600 mt-1 px-1">{fmt(line.timestamp)}</span>
+        <span className="flex items-center gap-1.5 text-[10px] text-slate-600 mt-1 px-1">
+          {fmt(line.timestamp)}
+          {line.speakerEdited && <span className="text-[#D4AF37]">· corrected</span>}
+          {!line.speakerEdited && line.speakerConfidence != null && (
+            <span className={lowConfidence ? 'text-amber-500' : 'text-slate-700'} title="Speaker identification confidence">
+              · {line.speakerConfidence}% conf
+            </span>
+          )}
+        </span>
       </div>
     </div>
   );

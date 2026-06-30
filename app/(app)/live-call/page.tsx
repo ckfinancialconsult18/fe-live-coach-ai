@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { LiveTranscript } from '@/components/live-call/LiveTranscript';
 import { AICoachPanel } from '@/components/live-call/AICoachPanel';
 import { CallStagePanel } from '@/components/live-call/CallStagePanel';
@@ -9,81 +9,117 @@ import { UnderwritingPanel } from '@/components/live-call/UnderwritingPanel';
 import { LiveReminders } from '@/components/live-call/LiveReminders';
 import { QuickObjectionBar } from '@/components/live-call/QuickObjectionBar';
 import { CallMetricsBar } from '@/components/live-call/CallMetricsBar';
+import { MicrophoneControls } from '@/components/live-call/MicrophoneControls';
+import { useMicrophone } from '@/hooks/useMicrophone';
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import type { CallMetrics } from '@/lib/types';
 import { scoreColor } from '@/lib/score-color';
 
 export default function LiveCallPage() {
-  const { transcript, isListening, error, startListening, stopListening, clearTranscript } = useRealtimeTranscription();
+  const mic = useMicrophone();
+  const {
+    transcript, connectionState, isListening, error,
+    startListening, stopListening, clearTranscript, correctSpeaker,
+  } = useRealtimeTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
-  const [metrics, setMetrics] = useState<CallMetrics>({
-    duration: 0, talkPct: 38, listenPct: 62,
-    sentimentScore: 0, connectionScore: 0, energyScore: 0, confidenceScore: 0,
-    avgResponseTime: 0, buyingSignalCount: 0, objectionCount: 0, callQuality: 0,
-  });
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<Record<string, unknown> | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'reminders'>('stage');
+  const [objectionCount, setObjectionCount] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const metricsRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callStartRef = useRef<number>(0);
+  const seenObjectionsRef = useRef<Set<string>>(new Set());
 
   // Run AI analysis whenever transcript updates
   useEffect(() => {
     if (transcript.length > 0) scheduleAnalysis(transcript);
   }, [transcript, scheduleAnalysis]);
 
-  // Update derived metrics from insight
+  // Track distinct objections as they're actually detected (real count, not a timer increment).
+  // The ref is mutated only here, inside an effect — never during render.
   useEffect(() => {
-    setMetrics((prev) => ({
-      ...prev,
-      buyingSignalCount: insight.buyingSignals.length,
-      callQuality: Math.max(prev.callQuality, insight.closeOpportunityPct > 50 ? 75 : 55),
-    }));
+    if (insight.detectedObjection && insight.objectType === 'objection') {
+      seenObjectionsRef.current.add(insight.detectedObjection);
+      setObjectionCount(seenObjectionsRef.current.size);
+    }
   }, [insight]);
+
+  // Real metrics — every value here is derived from an actual signal
+  // (transcript content/timing, live mic level, connection/health state),
+  // never simulated.
+  const metrics: CallMetrics = useMemo(() => {
+    const agentWords = transcript.filter((l) => l.speaker === 'agent').reduce((s, l) => s + l.text.split(/\s+/).length, 0);
+    const prospectWords = transcript.filter((l) => l.speaker === 'prospect').reduce((s, l) => s + l.text.split(/\s+/).length, 0);
+    const totalWords = agentWords + prospectWords;
+    const talkPct = totalWords > 0 ? Math.round((agentWords / totalWords) * 100) : 0;
+
+    // Response time: gap between a prospect line ending and the agent's next line starting.
+    const responseTimes: number[] = [];
+    for (let i = 1; i < transcript.length; i++) {
+      if (transcript[i].speaker === 'agent' && transcript[i - 1].speaker === 'prospect') {
+        const gapSec = (transcript[i].timestamp.getTime() - transcript[i - 1].timestamp.getTime()) / 1000;
+        if (gapSec > 0 && gapSec < 30) responseTimes.push(gapSec);
+      }
+    }
+    const avgResponseTime = responseTimes.length
+      ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
+      : 0;
+
+    const confidenceSamples = transcript.map((l) => l.speakerConfidence).filter((c): c is number => c != null);
+    const confidenceScore = confidenceSamples.length
+      ? Math.round(confidenceSamples.reduce((a, b) => a + b, 0) / confidenceSamples.length)
+      : 0;
+
+    const connectionScore = connectionState === 'connected' && mic.health === 'healthy' ? 100
+      : connectionState === 'reconnecting' || mic.health === 'silent' ? 45
+      : connectionState === 'failed' || mic.health === 'disconnected' || mic.health === 'error' ? 10
+      : 60;
+
+    const energyScore = Math.round(Math.min(1, mic.level * 6) * 100);
+
+    return {
+      duration,
+      talkPct,
+      listenPct: 100 - talkPct,
+      sentimentScore: insight.closeOpportunityPct,
+      connectionScore,
+      energyScore,
+      confidenceScore,
+      avgResponseTime: Math.round(avgResponseTime * 10) / 10,
+      buyingSignalCount: insight.buyingSignals.length,
+      objectionCount,
+      callQuality: Math.round((connectionScore + confidenceScore + insight.closeOpportunityPct) / 3),
+    };
+  }, [transcript, duration, connectionState, mic.health, mic.level, insight, objectionCount]);
 
   const startCall = useCallback(async () => {
     clearTranscript();
     setDuration(0);
     setPostCallReport(null);
     setShowPostCall(false);
-    setMetrics({
-      duration: 0, talkPct: 38, listenPct: 62,
-      sentimentScore: 60, connectionScore: 55, energyScore: 65, confidenceScore: 70,
-      avgResponseTime: 2.5, buyingSignalCount: 0, objectionCount: 0, callQuality: 60,
-    });
+    seenObjectionsRef.current = new Set();
+    setObjectionCount(0);
+
+    const stream = await mic.start();
+    if (!stream) return; // mic.error already surfaces a real error to the UI
 
     await startListening();
 
+    callStartRef.current = Date.now();
     timerRef.current = setInterval(() => {
-      setDuration((d) => d + 1);
+      setDuration(Math.floor((Date.now() - callStartRef.current) / 1000));
     }, 1000);
-
-    // Simulate slowly evolving metrics
-    metricsRef.current = setInterval(() => {
-      setMetrics((prev) => ({
-        ...prev,
-        duration: prev.duration + 3,
-        talkPct: clamp(prev.talkPct + (Math.random() - 0.55) * 2, 25, 65),
-        listenPct: 100 - clamp(prev.talkPct + (Math.random() - 0.55) * 2, 25, 65),
-        sentimentScore: clamp(prev.sentimentScore + (Math.random() - 0.4) * 3, 20, 100),
-        connectionScore: clamp(prev.connectionScore + (Math.random() - 0.35) * 2, 20, 100),
-        energyScore: clamp(prev.energyScore + (Math.random() - 0.5) * 2, 30, 100),
-        confidenceScore: clamp(prev.confidenceScore + (Math.random() - 0.4) * 2, 30, 100),
-        avgResponseTime: Math.max(1, prev.avgResponseTime + (Math.random() - 0.5) * 0.2),
-        objectionCount: prev.objectionCount,
-      }));
-    }, 3000);
-  }, [startListening, clearTranscript]);
+  }, [mic, startListening, clearTranscript]);
 
   const endCall = useCallback(async () => {
     stopListening();
+    mic.stop();
     if (timerRef.current) clearInterval(timerRef.current);
-    if (metricsRef.current) clearInterval(metricsRef.current);
 
     if (transcript.length > 0) {
       setLoadingReport(true);
@@ -102,11 +138,10 @@ export default function LiveCallPage() {
         setLoadingReport(false);
       }
     }
-  }, [stopListening, transcript, duration, metrics]);
+  }, [stopListening, mic, transcript, duration, metrics]);
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    if (metricsRef.current) clearInterval(metricsRef.current);
   }, []);
 
   const talkPct = Math.round(metrics.talkPct);
@@ -118,11 +153,16 @@ export default function LiveCallPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Mic controls bar */}
+      <div className="flex items-center justify-between gap-3 px-5 py-2 border-b border-white/6 shrink-0">
+        <MicrophoneControls mic={mic} connectionState={connectionState} />
+      </div>
+
       {/* Error banner */}
       {error && (
         <div className="flex items-center gap-3 px-5 py-2 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-400 shrink-0">
           <span>⚠️</span>
-          <span>{error} — Running in demo mode with simulated transcript.</span>
+          <span>{error}</span>
         </div>
       )}
 
@@ -131,7 +171,7 @@ export default function LiveCallPage() {
 
         {/* LEFT — Transcript (35%) */}
         <div className="flex flex-col w-[35%] min-w-0">
-          <LiveTranscript lines={transcript} isListening={isListening} />
+          <LiveTranscript lines={transcript} isListening={isListening} onCorrectSpeaker={correctSpeaker} />
         </div>
 
         {/* CENTER — AI Coach (32%) */}
@@ -198,6 +238,7 @@ export default function LiveCallPage() {
         avgResponseTime={metrics.avgResponseTime}
         isLive={isListening}
         onStartCall={startCall}
+        onEndCall={endCall}
       />
     </div>
   );
@@ -320,8 +361,4 @@ function PostCallReport({ report, loading, onClose }: {
       </div>
     </div>
   );
-}
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
 }
