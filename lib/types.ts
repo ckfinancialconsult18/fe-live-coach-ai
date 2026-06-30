@@ -76,6 +76,8 @@ export interface CoachInsight {
   closeOpportunityPct: number;
   emotionalOpportunities: string[];
   urgency: 'high' | 'medium' | 'low';
+  /** Incremental mid-call memory facts extracted this turn (Part 7) — merge into persistent CallMemory, never overwrite with null/empty. */
+  memoryUpdates: Partial<CallMemory> | null;
 }
 
 export interface UnderwritingProfile {
@@ -157,6 +159,102 @@ export interface CallRecord {
   transcript: TranscriptLine[];
   underwriting: UnderwritingProfile;
   metrics: CallMetrics;
+}
+
+// ── Phase 3: Mid-Call Memory ────────────────────────────────────────────────
+// Continuously accumulated during a live call so the coaching engine never
+// re-asks something already established (Part 7).
+export interface CallMemory {
+  clientName: string | null;
+  spouseName: string | null;
+  childrenMentioned: string[];
+  grandchildrenMentioned: boolean;
+  healthConditionsMentioned: string[];
+  budget: string | null;
+  carrierDiscussed: string | null;
+  premiumMentioned: string | null;
+  objectionsRaised: string[];
+  questionsAsked: string[];
+}
+
+export const EMPTY_CALL_MEMORY: CallMemory = {
+  clientName: null,
+  spouseName: null,
+  childrenMentioned: [],
+  grandchildrenMentioned: false,
+  healthConditionsMentioned: [],
+  budget: null,
+  carrierDiscussed: null,
+  premiumMentioned: null,
+  objectionsRaised: [],
+  questionsAsked: [],
+};
+
+// ── Phase 3: Call Timeline ──────────────────────────────────────────────────
+export type TimelineEventCategory =
+  | 'greeting' | 'rapport' | 'discovery' | 'objection' | 'buying_signal'
+  | 'health_qualification' | 'price_discussion' | 'application_attempt' | 'close';
+
+export interface TimelineEvent {
+  id: string;
+  timestampSec: number;
+  category: TimelineEventCategory;
+  label: string;
+  transcriptLineId: string | null;
+}
+
+// ── Phase 3: AI Quality Score (12-dimension radar) ──────────────────────────
+export interface QualityScores {
+  confidence: number;
+  authority: number;
+  empathy: number;
+  listening: number;
+  pacing: number;
+  control: number;
+  objectionHandling: number;
+  discovery: number;
+  closing: number;
+  compliance: number;
+  naturalness: number;
+  overallSalesEffectiveness: number;
+}
+
+// ── Phase 3: Expanded After-Call Report ─────────────────────────────────────
+export interface ObjectionHandlingRecord {
+  objection: string;
+  handled: boolean;
+  howHandled: string;
+}
+
+export interface PostCallReport {
+  summary: string;
+  overallScore: number;
+  rapportScore: number;
+  discoveryScore: number;
+  trustScore: number;
+  closingScore: number;
+  talkPct: number;
+  listenPct: number;
+  questionsAskedCount: number;
+  scores: Record<string, number>;
+  qualityScores: QualityScores;
+  timeline: TimelineEvent[];
+  strengths: string[];
+  missedOpportunities: string[];
+  buyingSignals: string[];
+  objections: string[];
+  objectionsHandling: ObjectionHandlingRecord[];
+  mostEffectiveMoments: string[];
+  weakestMoments: string[];
+  whatShouldHaveBeenDifferent: string[];
+  aiCoachingSummary: string;
+  threeBiggestImprovements: string[];
+  threeBiggestStrengths: string[];
+  overallGrade: string;
+  followUpText: string;
+  followUpEmail: string;
+  crmNotes: string;
+  improvementPlan: string[];
 }
 
 // ── CRM types ─────────────────────────────────────────────────────────────────

@@ -73,8 +73,27 @@ isn't actually in the transcript):
   },
   "closeOpportunityPct": 0-100,
   "emotionalOpportunities": ["opportunity 1", "opportunity 2"],
-  "urgency": "high" | "medium" | "low"
+  "urgency": "high" | "medium" | "low",
+  "memoryUpdates": null | {
+    "clientName": "first name if stated this turn, else omit",
+    "spouseName": "spouse's name if mentioned this turn, else omit",
+    "childrenMentioned": ["any children named or referenced this turn"],
+    "grandchildrenMentioned": true | false,
+    "healthConditionsMentioned": ["any health condition named this turn, verbatim"],
+    "budget": "a budget/monthly amount if stated this turn, else omit",
+    "carrierDiscussed": "a carrier name if mentioned this turn, else omit",
+    "premiumMentioned": "a premium dollar amount if quoted this turn, else omit",
+    "objectionsRaised": ["objection summary if one occurred this turn"],
+    "questionsAsked": ["any question the AGENT asked this turn, verbatim"]
+  }
 }
+
+MID-CALL MEMORY — you will be given a JSON snapshot of facts already
+established earlier in this call (knownMemory, see the user message). NEVER
+suggest a question that re-asks something already in knownMemory (e.g. if
+knownMemory.budget is already set, do not suggest asking about budget again
+— suggest the next unestablished thing instead). Only emit "memoryUpdates"
+for NEW facts learned this turn, not facts already in knownMemory.
 
 IMPORTANT CONTEXT — FINAL EXPENSE SALES:
 - These are seniors aged 50-85, often on fixed income
@@ -109,12 +128,18 @@ Return JSON with these exact fields (use null for unknown):
   "surgeries": string | null
 }`;
 
-export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze this complete call transcript and generate a comprehensive post-call report.
+export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze this complete call transcript and generate a comprehensive post-call report. You will also be given the agent's actual talk/listen percentages and question count, computed deterministically from the transcript — use those numbers as given, do not recompute or contradict them.
+
+Ground every claim in the actual transcript. Never invent a strength, weakness, or quote that isn't traceable to what was said.
 
 Return JSON:
 {
-  "summary": "3-4 sentence summary of the call",
+  "summary": "3-4 sentence executive summary of the call",
   "overallScore": 0-100,
+  "rapportScore": 0-100,
+  "discoveryScore": 0-100,
+  "trustScore": 0-100,
+  "closingScore": 0-100,
   "scores": {
     "introduction": 0-100,
     "permission": 0-100,
@@ -129,10 +154,34 @@ Return JSON:
     "rapport": 0-100,
     "emotion": 0-100
   },
+  "qualityScores": {
+    "confidence": 0-100,
+    "authority": 0-100,
+    "empathy": 0-100,
+    "listening": 0-100,
+    "pacing": 0-100,
+    "control": 0-100,
+    "objectionHandling": 0-100,
+    "discovery": 0-100,
+    "closing": 0-100,
+    "compliance": 0-100,
+    "naturalness": 0-100,
+    "overallSalesEffectiveness": 0-100
+  },
   "strengths": ["strength 1", "strength 2", "strength 3"],
   "missedOpportunities": ["opportunity 1", "opportunity 2"],
   "buyingSignals": ["signal 1", "signal 2"],
   "objections": ["objection 1", "objection 2"],
+  "objectionsHandling": [
+    { "objection": "exact objection from transcript", "handled": true | false, "howHandled": "what the agent did or should have done" }
+  ],
+  "mostEffectiveMoments": ["a specific moment that worked well, with brief why"],
+  "weakestMoments": ["a specific moment that didn't work, with brief why"],
+  "whatShouldHaveBeenDifferent": ["specific alternative action the agent should have taken"],
+  "aiCoachingSummary": "2-3 sentence coaching summary in a sales manager's voice",
+  "threeBiggestImprovements": ["improvement 1", "improvement 2", "improvement 3"],
+  "threeBiggestStrengths": ["strength 1", "strength 2", "strength 3"],
+  "overallGrade": "A+" | "A" | "A-" | "B+" | "B" | "B-" | "C+" | "C" | "C-" | "D" | "F",
   "followUpText": "a ready-to-send follow-up SMS message",
   "followUpEmail": "a ready-to-send follow-up email",
   "crmNotes": "concise CRM notes for this contact",

@@ -1,8 +1,26 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem } from '@/lib/types';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory } from '@/lib/types';
+import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriers } from '@/lib/carrier-rules';
+
+function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | undefined): CallMemory {
+  if (!updates) return prev;
+  const dedupe = (a: string[], b?: string[]) => Array.from(new Set([...a, ...(b ?? [])]));
+  return {
+    clientName: updates.clientName ?? prev.clientName,
+    spouseName: updates.spouseName ?? prev.spouseName,
+    childrenMentioned: dedupe(prev.childrenMentioned, updates.childrenMentioned),
+    grandchildrenMentioned: prev.grandchildrenMentioned || !!updates.grandchildrenMentioned,
+    healthConditionsMentioned: dedupe(prev.healthConditionsMentioned, updates.healthConditionsMentioned),
+    budget: updates.budget ?? prev.budget,
+    carrierDiscussed: updates.carrierDiscussed ?? prev.carrierDiscussed,
+    premiumMentioned: updates.premiumMentioned ?? prev.premiumMentioned,
+    objectionsRaised: dedupe(prev.objectionsRaised, updates.objectionsRaised),
+    questionsAsked: dedupe(prev.questionsAsked, updates.questionsAsked),
+  };
+}
 
 const DEFAULT_INSIGHT: CoachInsight = {
   detectedObjection: null,
@@ -19,6 +37,7 @@ const DEFAULT_INSIGHT: CoachInsight = {
   closeOpportunityPct: 0,
   emotionalOpportunities: [],
   urgency: 'low',
+  memoryUpdates: null,
 };
 
 const DEFAULT_UNDERWRITING: UnderwritingProfile = {
@@ -45,9 +64,14 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [carriers, setCarriers] = useState<CarrierMatch[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>(DEFAULT_CHECKLIST);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
 
   const lastAnalyzedIdx = useRef(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const memoryRef = useRef(memory);
+  useEffect(() => {
+    memoryRef.current = memory;
+  }, [memory]);
 
   const analyze = useCallback(async (lines: TranscriptLine[]) => {
     if (lines.length === 0) return;
@@ -64,11 +88,15 @@ export function useAICoach(transcript: TranscriptLine[]) {
       const res = await fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length }),
+        body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length, memory: memoryRef.current }),
       });
 
       if (!res.ok) return;
       const data = await res.json();
+
+      if (data.insight?.memoryUpdates) {
+        setMemory((prev) => mergeMemory(prev, data.insight.memoryUpdates));
+      }
 
       // Normalize defensively: the model may omit a field on a given turn
       // (e.g. no objection currently active) — fill gaps with neutral
@@ -131,5 +159,5 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 1500);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage };
+  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory };
 }

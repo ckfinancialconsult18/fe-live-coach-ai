@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
-  const { transcript, fullLength } = await req.json() as { transcript: string; fullLength: number };
+  const { transcript, fullLength, memory } = await req.json() as { transcript: string; fullLength: number; memory?: Record<string, unknown> };
 
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
@@ -35,7 +35,10 @@ export async function POST(req: NextRequest) {
           ...(ragContext
             ? [{ role: 'system' as const, content: `Relevant material from this agent's own carrier guides, scripts, and objection-handling docs — prefer this over general knowledge when it applies:\n\n${ragContext}` }]
             : []),
-          { role: 'user', content: `Current conversation:\n\n${transcript}\n\nAnalyze this and respond in the exact JSON format specified.` },
+          {
+            role: 'user',
+            content: `knownMemory (facts already established this call — do not re-ask these): ${JSON.stringify(memory ?? {})}\n\nCurrent conversation:\n\n${transcript}\n\nAnalyze this and respond in the exact JSON format specified.`,
+          },
         ],
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -126,6 +129,7 @@ function getDemoInsight(lineCount: number) {
         closeOpportunityPct: 10,
         emotionalOpportunities: [],
         urgency: 'low',
+        memoryUpdates: null,
       },
       stage: 'introduction',
       underwriting: null,
@@ -160,6 +164,7 @@ function getDemoInsight(lineCount: number) {
         closeOpportunityPct: 25,
         emotionalOpportunities: ['Mention protecting family from burden'],
         urgency: 'low',
+        memoryUpdates: null,
       },
       stage: 'discovery',
       underwriting: null,
@@ -206,6 +211,11 @@ function getDemoInsight(lineCount: number) {
       closeOpportunityPct: 65,
       emotionalOpportunities: ['She mentioned not wanting to burden her children — come back to that'],
       urgency: 'high',
+      memoryUpdates: {
+        clientName: 'Dorothy',
+        healthConditionsMentioned: ['diabetes'],
+        objectionsRaised: ["I'd like to think about that. Can I call you back?"],
+      },
     },
     stage: 'objections',
     underwriting: { age: '68', gender: 'Female', diabetes: true, tobacco: false },

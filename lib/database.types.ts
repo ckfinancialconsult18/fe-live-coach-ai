@@ -148,6 +148,8 @@ export interface Database {
           recording_path: string | null;
           started_at: string;
           ended_at: string | null;
+          status: 'in_progress' | 'completed' | 'abandoned';
+          live_state: Json;
           created_at: string;
           updated_at: string;
         };
@@ -162,6 +164,9 @@ export interface Database {
           user_id: string;
           overall_score: number;
           scores: Json;
+          quality_scores: Json;
+          timeline: Json;
+          report_details: Json;
           strengths: string[];
           missed_opportunities: string[];
           buying_signals: string[];
