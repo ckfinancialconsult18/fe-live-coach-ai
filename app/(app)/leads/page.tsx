@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import { mockLeads } from '@/lib/mock-data';
 import type { Lead, LeadStatus } from '@/lib/types';
 
 const statusConfig: Record<LeadStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' | 'purple' }> = {
@@ -28,7 +27,8 @@ const emptyLead: Partial<Lead> = {
 };
 
 export default function LeadsPage() {
-  const [leads, setLeads] = useState<Lead[]>(mockLeads);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<LeadStatus | 'all'>('all');
   const [filterSource, setFilterSource] = useState('all');
@@ -37,6 +37,13 @@ export default function LeadsPage() {
   const [editingLead, setEditingLead] = useState<Partial<Lead>>(emptyLead);
   const [isEdit, setIsEdit] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+  useEffect(() => {
+    fetch('/api/leads')
+      .then((r) => r.json())
+      .then((d) => setLeads(d.leads ?? []))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = leads.filter((l) => {
     const q = search.toLowerCase();
@@ -58,36 +65,44 @@ export default function LeadsPage() {
     setModalOpen(true);
   }
 
-  function saveLead() {
+  async function saveLead() {
     if (!editingLead.firstName || !editingLead.lastName) return;
     if (isEdit) {
-      setLeads((prev) => prev.map((l) => l.id === editingLead.id ? { ...l, ...editingLead } as Lead : l));
+      const res = await fetch(`/api/leads/${editingLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingLead),
+      });
+      const { lead } = await res.json();
+      setLeads((prev) => prev.map((l) => l.id === lead.id ? lead : l));
     } else {
-      const newLead: Lead = {
-        id: `l${Date.now()}`,
-        firstName: editingLead.firstName!,
-        lastName: editingLead.lastName!,
-        email: editingLead.email ?? '',
-        phone: editingLead.phone ?? '',
-        status: editingLead.status as LeadStatus ?? 'new',
-        source: editingLead.source ?? '',
-        tags: editingLead.tags ?? [],
-        notes: editingLead.notes ?? '',
-        assignedTo: 'Courtney K.',
-        createdAt: new Date().toISOString().split('T')[0],
-        updatedAt: new Date().toISOString().split('T')[0],
-        city: editingLead.city,
-        state: editingLead.state,
-        age: editingLead.age,
-      };
-      setLeads((prev) => [newLead, ...prev]);
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: editingLead.firstName,
+          lastName: editingLead.lastName,
+          email: editingLead.email ?? '',
+          phone: editingLead.phone ?? '',
+          status: (editingLead.status as LeadStatus) ?? 'new',
+          source: editingLead.source ?? '',
+          tags: editingLead.tags ?? [],
+          notes: editingLead.notes ?? '',
+          city: editingLead.city,
+          state: editingLead.state,
+          age: editingLead.age,
+        }),
+      });
+      const { lead } = await res.json();
+      setLeads((prev) => [lead, ...prev]);
     }
     setModalOpen(false);
   }
 
-  function deleteLead(id: string) {
+  async function deleteLead(id: string) {
     setLeads((prev) => prev.filter((l) => l.id !== id));
     setSelectedLead(null);
+    await fetch(`/api/leads/${id}`, { method: 'DELETE' });
   }
 
   return (
@@ -228,7 +243,7 @@ export default function LeadsPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={8} className="text-center py-12 text-slate-600">
-                      No leads match your search
+                      {loading ? 'Loading leads...' : 'No leads match your search'}
                     </td>
                   </tr>
                 )}

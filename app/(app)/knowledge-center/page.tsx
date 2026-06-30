@@ -65,12 +65,12 @@ export default function KnowledgeCenterPage() {
   }, []);
 
   const loadJobs = useCallback(async () => {
-    const res = await fetch('/api/pipeline/queue').catch(() => null);
+    const res = await fetch('/api/knowledge/jobs').catch(() => null);
     if (res?.ok) setJobs(await res.json().then((d: { jobs: PipelineJob[] }) => d.jobs));
   }, []);
 
   const loadPending = useCallback(async (filter: string = 'pending') => {
-    const res = await fetch(`/api/pipeline/pending?filter=${filter}&pageSize=100`).catch(() => null);
+    const res = await fetch(`/api/knowledge/insights?filter=${filter}&pageSize=100`).catch(() => null);
     if (res?.ok) {
       const d = await res.json() as { entries: PendingEntryIndex[]; total: number };
       setPendingEntries(d.entries);
@@ -79,7 +79,7 @@ export default function KnowledgeCenterPage() {
   }, []);
 
   const loadStats = useCallback(async () => {
-    const res = await fetch('/api/pipeline/stats').catch(() => null);
+    const res = await fetch('/api/knowledge/insights/stats').catch(() => null);
     if (res?.ok) setStats(await res.json().then((d: { stats: PipelineStats }) => d.stats));
   }, []);
 
@@ -90,7 +90,11 @@ export default function KnowledgeCenterPage() {
     loadStats();
   }, [loadJobs, loadPending, loadStats]);
 
-  // Poll queue while processing
+  // Upload now processes each file synchronously server-side (store → extract
+  // → normalize → insert pending knowledge_base rows), so there's no queue to
+  // poll — the upload response already contains final job statuses. We still
+  // poll briefly in case a request is genuinely slow (large file / model
+  // latency) so the UI doesn't look stuck.
   useEffect(() => {
     const hasActive = jobs.some((j) =>
       ['queued', 'parsing', 'extracting', 'deduplicating'].includes(j.status)
@@ -99,30 +103,6 @@ export default function KnowledgeCenterPage() {
     const iv = setInterval(loadJobs, 2500);
     return () => clearInterval(iv);
   }, [jobs, loadJobs]);
-
-  const runProcessingLoop = useCallback(async () => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-    try {
-      let iterations = 0;
-      while (iterations < 500) {
-        const res = await fetch('/api/pipeline/process', { method: 'POST' });
-        if (!res.ok) {
-          await loadJobs();
-          break;
-        }
-        const data = await res.json() as { done: boolean };
-        await loadJobs();
-        if (data.done) break;
-        iterations++;
-      }
-    } finally {
-      setIsProcessing(false);
-      await loadPending();
-      await loadStats();
-      showNotification('Processing complete — review new knowledge entries');
-    }
-  }, [isProcessing, loadJobs, loadPending, loadStats, showNotification]);
 
   const onFilesSelected = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -137,16 +117,23 @@ export default function KnowledgeCenterPage() {
     const fd = new FormData();
     for (const f of filtered) fd.append('files', f);
 
-    const res = await fetch('/api/pipeline/upload', { method: 'POST', body: fd });
-    if (!res.ok) {
-      showNotification('Upload failed', 'error');
-      return;
+    setIsProcessing(true);
+    try {
+      const res = await fetch('/api/knowledge/jobs/upload', { method: 'POST', body: fd });
+      if (!res.ok) {
+        showNotification('Upload failed', 'error');
+        return;
+      }
+      const { jobs: newJobs } = await res.json() as { jobs: PipelineJob[] };
+      const newKnowledge = newJobs.reduce((sum, j) => sum + (j.newKnowledgeCount ?? 0), 0);
+      showNotification(`Processed ${newJobs.length} file${newJobs.length !== 1 ? 's' : ''} — ${newKnowledge} new insight${newKnowledge !== 1 ? 's' : ''} ready for review`);
+      await loadJobs();
+      await loadPending();
+      await loadStats();
+    } finally {
+      setIsProcessing(false);
     }
-    const { jobs: newJobs } = await res.json() as { jobs: PipelineJob[] };
-    showNotification(`${newJobs.length} file${newJobs.length !== 1 ? 's' : ''} queued for processing`);
-    await loadJobs();
-    runProcessingLoop();
-  }, [loadJobs, runProcessingLoop, showNotification]);
+  }, [loadJobs, loadPending, loadStats, showNotification]);
 
   return (
     <div className="flex flex-col h-full">
@@ -465,7 +452,7 @@ function ReviewTab({
   const loadExpanded = useCallback(async (id: string) => {
     if (expandedId === id) { setExpandedId(null); setExpandedEntry(null); return; }
     setExpandedId(id);
-    const res = await fetch(`/api/pipeline/pending?id=${id}`);
+    const res = await fetch(`/api/knowledge/insights?id=${id}`);
     if (res.ok) setExpandedEntry(await res.json().then((d: { entry: PendingKnowledgeEntry }) => d.entry));
   }, [expandedId]);
 
@@ -477,7 +464,7 @@ function ReviewTab({
     if (!ids.length || isActing) return;
     setIsActing(true);
     try {
-      const res = await fetch('/api/pipeline/approve', {
+      const res = await fetch('/api/knowledge/insights/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, action, note }),
@@ -828,7 +815,7 @@ function SearchTab() {
       const params = new URLSearchParams({ q, page: String(p), pageSize: '30' });
       if (statusFilter) params.set('status', statusFilter);
       if (typeFilter) params.set('type', typeFilter);
-      const res = await fetch(`/api/pipeline/search?${params}`);
+      const res = await fetch(`/api/knowledge/insights/search?${params}`);
       if (res.ok) {
         const d = await res.json() as { results: SearchResult[]; total: number };
         setResults(d.results);

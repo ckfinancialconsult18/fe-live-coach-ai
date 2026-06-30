@@ -1,11 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
-import { mockPolicies } from '@/lib/mock-data';
-import type { PolicyType, PolicyStatus } from '@/lib/types';
+import type { Policy, PolicyType } from '@/lib/types';
 
 const typeLabels: Record<PolicyType, string> = {
   final_expense: 'Final Expense',
@@ -23,21 +21,29 @@ const typeColors: Record<PolicyType, 'blue' | 'green' | 'purple' | 'amber' | 'cy
   universal_life: 'amber',
 };
 
-const statusVariant: Record<PolicyStatus, 'success' | 'warning' | 'danger' | 'default'> = {
+const statusVariant: Record<string, 'success' | 'warning' | 'danger' | 'default'> = {
   active: 'success',
+  issued: 'success',
   pending: 'warning',
   lapsed: 'danger',
+  declined: 'danger',
+  withdrawn: 'default',
   cancelled: 'default',
 };
 
 export default function PoliciesPage() {
+  const [policies, setPolicies] = useState<Policy[]>([]);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<PolicyType | 'all'>('all');
   const [filterCarrier, setFilterCarrier] = useState('all');
 
-  const carriers = [...new Set(mockPolicies.map((p) => p.carrier))];
+  useEffect(() => {
+    fetch('/api/policies').then((r) => r.json()).then((d) => setPolicies(d.policies ?? []));
+  }, []);
 
-  const filtered = mockPolicies.filter((p) => {
+  const carriers = [...new Set(policies.map((p) => p.carrier))];
+
+  const filtered = policies.filter((p) => {
     const q = search.toLowerCase();
     const matchSearch = !q || `${p.clientName} ${p.policyNumber} ${p.carrier}`.toLowerCase().includes(q);
     const matchType = filterType === 'all' || p.type === filterType;
@@ -142,7 +148,7 @@ export default function PoliciesPage() {
                       <span className="text-slate-600 text-xs ml-1">({(policy.commissionRate * 100).toFixed(0)}%)</span>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant={statusVariant[policy.status]}>{policy.status}</Badge>
+                      <Badge variant={statusVariant[policy.status] ?? 'default'}>{policy.status}</Badge>
                     </td>
                     <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{policy.effectiveDate}</td>
                   </tr>
@@ -161,7 +167,7 @@ export default function PoliciesPage() {
         <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">By Product Type</h3>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {Object.entries(typeLabels).map(([type, label]) => {
-            const count = mockPolicies.filter((p) => p.type === type).length;
+            const count = policies.filter((p) => p.type === type).length;
             const color = typeColors[type as PolicyType];
             const colorClass = {
               blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',

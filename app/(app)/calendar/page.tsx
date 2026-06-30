@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select, Textarea } from '@/components/ui/Input';
-import { mockAppointments } from '@/lib/mock-data';
 import type { Appointment } from '@/lib/types';
 
 type View = 'month' | 'week' | 'day';
@@ -37,12 +36,16 @@ export default function CalendarPage() {
   const today = new Date('2026-06-29');
   const [view, setView] = useState<View>('month');
   const [currentDate, setCurrentDate] = useState(today);
-  const [appointments, setAppointments] = useState<Appointment[]>(mockAppointments);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [newAppt, setNewAppt] = useState<Partial<Appointment>>({
     type: 'phone', status: 'scheduled', title: '', description: '',
   });
+
+  useEffect(() => {
+    fetch('/api/appointments').then((r) => r.json()).then((d) => setAppointments(d.appointments ?? []));
+  }, []);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -70,18 +73,22 @@ export default function CalendarPage() {
     setModalOpen(true);
   }
 
-  function saveAppt() {
+  async function saveAppt() {
     if (!newAppt.title) return;
-    const appt: Appointment = {
-      id: `a${Date.now()}`,
-      title: newAppt.title!,
-      description: newAppt.description ?? '',
-      startTime: newAppt.startTime ?? `${selectedDate}T09:00:00`,
-      endTime: newAppt.endTime ?? `${selectedDate}T10:00:00`,
-      type: newAppt.type as 'phone' | 'video' | 'in_person' ?? 'phone',
-      status: 'scheduled',
-    };
-    setAppointments((prev) => [...prev, appt]);
+    const res = await fetch('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: newAppt.title,
+        description: newAppt.description ?? '',
+        startTime: newAppt.startTime ?? `${selectedDate}T09:00:00`,
+        endTime: newAppt.endTime ?? `${selectedDate}T10:00:00`,
+        type: (newAppt.type as 'phone' | 'video' | 'in_person') ?? 'phone',
+        status: 'scheduled',
+      }),
+    });
+    const { appointment } = await res.json();
+    setAppointments((prev) => [...prev, appointment]);
     setModalOpen(false);
   }
 

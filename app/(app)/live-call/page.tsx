@@ -93,7 +93,7 @@ export default function LiveCallPage() {
         const res = await fetch('/api/post-call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transcript: text }),
+          body: JSON.stringify({ transcript: text, duration, metrics }),
         });
         if (res.ok) setPostCallReport(await res.json());
       } catch {
@@ -102,7 +102,7 @@ export default function LiveCallPage() {
         setLoadingReport(false);
       }
     }
-  }, [stopListening, transcript]);
+  }, [stopListening, transcript, duration, metrics]);
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);

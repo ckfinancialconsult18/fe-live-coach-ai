@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select, Textarea } from '@/components/ui/Input';
-import { mockTasks } from '@/lib/mock-data';
 import type { Task, TaskPriority } from '@/lib/types';
 
 const priorityConfig: Record<TaskPriority, { label: string; color: string; variant: 'danger' | 'warning' | 'info' | 'default'; dot: string }> = {
@@ -18,12 +17,16 @@ const priorityConfig: Record<TaskPriority, { label: string; color: string; varia
 const priorityOrder: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
 
 export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'open' | 'done'>('all');
   const [filterPriority, setFilterPriority] = useState<TaskPriority | 'all'>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [newTask, setNewTask] = useState<Partial<Task>>({ priority: 'medium', title: '', description: '', dueDate: '' });
+
+  useEffect(() => {
+    fetch('/api/tasks').then((r) => r.json()).then((d) => setTasks(d.tasks ?? []));
+  }, []);
 
   const filtered = tasks.filter((t) => {
     const q = search.toLowerCase();
@@ -36,25 +39,36 @@ export default function TasksPage() {
   const openTasks = tasks.filter((t) => !t.completed);
   const doneTasks = tasks.filter((t) => t.completed);
 
-  function toggleTask(id: string) {
+  async function toggleTask(id: string) {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
     setTasks((prev) => prev.map((t) => t.id === id ? { ...t, completed: !t.completed } : t));
+    await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: !task.completed }),
+    });
   }
 
-  function deleteTask(id: string) {
+  async function deleteTask(id: string) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
   }
 
-  function saveTask() {
+  async function saveTask() {
     if (!newTask.title) return;
-    const task: Task = {
-      id: `t${Date.now()}`,
-      title: newTask.title!,
-      description: newTask.description ?? '',
-      dueDate: newTask.dueDate ?? '',
-      priority: newTask.priority as TaskPriority ?? 'medium',
-      completed: false,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: newTask.title,
+        description: newTask.description ?? '',
+        dueDate: newTask.dueDate ?? '',
+        priority: (newTask.priority as TaskPriority) ?? 'medium',
+        completed: false,
+      }),
+    });
+    const { task } = await res.json();
     setTasks((prev) => [task, ...prev]);
     setModalOpen(false);
     setNewTask({ priority: 'medium', title: '', description: '', dueDate: '' });

@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/api/guard';
 
 export async function POST() {
+  const { user, response } = await requireUser();
+  if (!user) return response;
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });

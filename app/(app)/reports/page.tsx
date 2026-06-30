@@ -1,22 +1,55 @@
+import { createClient } from '@/lib/supabase/server';
+
 export const metadata = { title: 'Reports' };
 
-const weeklyData = [
-  { day: 'Mon', calls: 8, policies: 2, score: 74 },
-  { day: 'Tue', calls: 6, policies: 1, score: 68 },
-  { day: 'Wed', calls: 10, policies: 3, score: 81 },
-  { day: 'Thu', calls: 7, policies: 2, score: 79 },
-  { day: 'Fri', calls: 9, policies: 2, score: 76 },
-  { day: 'Sat', calls: 4, policies: 1, score: 83 },
-  { day: 'Sun', calls: 2, policies: 0, score: 70 },
-];
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const maxCalls = Math.max(...weeklyData.map((d) => d.calls));
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
 
-export default function ReportsPage() {
+export default async function ReportsPage() {
+  const supabase = await createClient();
+
+  const today = startOfDay(new Date());
+  const rangeStart = new Date(today);
+  rangeStart.setDate(rangeStart.getDate() - 6); // last 7 days inclusive
+
+  const [{ data: calls }, { data: scores }] = await Promise.all([
+    supabase
+      .from('calls')
+      .select('id, started_at, outcome')
+      .gte('started_at', rangeStart.toISOString())
+      .order('started_at'),
+    supabase
+      .from('call_scores')
+      .select('overall_score, created_at, call_id')
+      .gte('created_at', rangeStart.toISOString()),
+  ]);
+
+  const scoreByCallId = new Map((scores ?? []).map((s) => [s.call_id, s.overall_score]));
+
+  // Build 7 buckets ending today, in chronological order.
+  const weeklyData = Array.from({ length: 7 }).map((_, i) => {
+    const day = new Date(rangeStart);
+    day.setDate(day.getDate() + i);
+    const dayCalls = (calls ?? []).filter((c) => startOfDay(new Date(c.started_at)).getTime() === day.getTime());
+    const dayScores = dayCalls.map((c) => scoreByCallId.get(c.id)).filter((s): s is number => s != null);
+    const avgScore = dayScores.length ? Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length) : 0;
+    return {
+      day: DAY_LABELS[day.getDay()],
+      calls: dayCalls.length,
+      policies: dayCalls.filter((c) => c.outcome === 'policy_written').length,
+      score: avgScore,
+    };
+  });
+
+  const maxCalls = Math.max(1, ...weeklyData.map((d) => d.calls));
   const totalCalls = weeklyData.reduce((a, d) => a + d.calls, 0);
   const totalPolicies = weeklyData.reduce((a, d) => a + d.policies, 0);
-  const avgScore = Math.round(weeklyData.reduce((a, d) => a + d.score, 0) / weeklyData.length);
-  const closeRate = Math.round((totalPolicies / totalCalls) * 100);
+  const scoredDays = weeklyData.filter((d) => d.score > 0);
+  const avgScore = scoredDays.length ? Math.round(scoredDays.reduce((a, d) => a + d.score, 0) / scoredDays.length) : 0;
+  const closeRate = totalCalls > 0 ? Math.round((totalPolicies / totalCalls) * 100) : 0;
 
   return (
     <div className="space-y-6 max-w-[1200px]">
@@ -45,8 +78,8 @@ export default function ReportsPage() {
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-slate-200">Daily Calls This Week</h3>
         <div className="flex items-end gap-3 h-40">
-          {weeklyData.map((d) => (
-            <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
+          {weeklyData.map((d, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
               <span className="text-[10px] text-slate-500 font-medium">{d.calls}</span>
               <div
                 className="w-full rounded-t-lg transition-all duration-700"
@@ -60,14 +93,15 @@ export default function ReportsPage() {
             </div>
           ))}
         </div>
+        {totalCalls === 0 && <p className="text-xs text-slate-600 text-center">No calls logged in the last 7 days</p>}
       </div>
 
       {/* Score trend */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-slate-200">Call Score by Day</h3>
         <div className="space-y-2">
-          {weeklyData.map((d) => (
-            <div key={d.day} className="flex items-center gap-3">
+          {weeklyData.map((d, i) => (
+            <div key={i} className="flex items-center gap-3">
               <span className="text-xs text-slate-500 w-8 shrink-0">{d.day}</span>
               <div className="flex-1 h-2 bg-white/5 rounded-full">
                 <div

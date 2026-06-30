@@ -712,3 +712,731 @@ create policy "transcripts_owner_all"
   on storage.objects for all
   using (bucket_id = 'transcripts' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'transcripts' and (storage.foldername(name))[1] = auth.uid()::text);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Extend contacts with full FE-agent client intake fields.
+-- Design decision: contacts is the single source of truth for the address book
+-- (status: lead/client/inactive). A separate `clients` table would duplicate
+-- this data and require sync logic — instead we extend contacts and expose a
+-- `clients` view for callers that only want status = 'client' rows.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+alter table public.contacts
+  add column if not exists middle_name           text,
+  add column if not exists gender                text check (gender in ('male', 'female', 'other', 'unspecified')),
+  add column if not exists secondary_phone        text,
+  add column if not exists county                 text,
+  add column if not exists marital_status         text check (marital_status in ('single', 'married', 'divorced', 'widowed', 'unspecified')),
+  add column if not exists occupation             text,
+  add column if not exists beneficiary_name        text,
+  add column if not exists beneficiary_relationship text,
+  add column if not exists medicare               boolean,
+  add column if not exists tobacco                boolean,
+  add column if not exists prescription_notes      text,
+  add column if not exists current_carrier         text,
+  add column if not exists agent_notes             text;
+
+-- `source` already exists and doubles as "lead source"; `medical_notes` already
+-- exists and covers "Health Notes"; `existing_coverage` already covers
+-- "Existing Coverage". No need to duplicate those.
+
+create index if not exists contacts_county_idx on public.contacts(county);
+
+create or replace view public.clients as
+  select * from public.contacts where status = 'client';
+
+-- View inherits RLS from the underlying contacts table automatically in
+-- Postgres (security_invoker is the default for views owned by the same
+-- role), but make it explicit for clarity and to survive future changes.
+alter view public.clients set (security_invoker = true);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Extend leads with FE-specific pipeline tracking fields.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+alter table public.leads
+  add column if not exists lead_vendor       text,
+  add column if not exists cost              numeric(10,2),
+  add column if not exists lead_type         text check (lead_type in ('fresh', 'aged', 'internet', 'direct_mail', 'referral', 'other')),
+  add column if not exists purchased_date    date,
+  add column if not exists lead_score        int check (lead_score between 0 and 100),
+  add column if not exists last_contact_at   timestamptz,
+  add column if not exists disposition       text,
+  add column if not exists attempts          int not null default 0,
+  add column if not exists appointment_date  timestamptz,
+  add column if not exists policy_sold       boolean not null default false,
+  add column if not exists close_probability int check (close_probability between 0 and 100);
+
+create index if not exists leads_lead_type_idx on public.leads(lead_type);
+create index if not exists leads_purchased_date_idx on public.leads(purchased_date);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- carriers — reference data for the insurance carriers an agent works with.
+-- Shared per-user (each agent maintains their own carrier book, since contact
+-- info / commission schedules differ by agent contract).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.carriers (
+  id                    uuid primary key default gen_random_uuid(),
+  user_id               uuid not null references public.users(id) on delete cascade,
+  name                  text not null,
+  naic                  text,
+  customer_service_phone text,
+  agent_support_phone    text,
+  underwriting_contact   text,
+  commission_schedule    jsonb not null default '{}',
+  products              text[] not null default '{}',
+  states_available      text[] not null default '{}',
+  application_link      text,
+  training_docs_url     text,
+  website               text,
+  contact_name           text,
+  contact_email          text,
+  notes                 text,
+  active_contracts      int not null default 0,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  unique (user_id, name)
+);
+
+create index carriers_user_id_idx on public.carriers(user_id);
+
+create trigger carriers_set_updated_at
+  before update on public.carriers
+  for each row execute function public.set_updated_at();
+
+alter table public.carriers enable row level security;
+
+create policy "carriers_select_own"
+  on public.carriers for select
+  using (auth.uid() = user_id);
+
+create policy "carriers_insert_own"
+  on public.carriers for insert
+  with check (auth.uid() = user_id);
+
+create policy "carriers_update_own"
+  on public.carriers for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "carriers_delete_own"
+  on public.carriers for delete
+  using (auth.uid() = user_id);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- policies — written insurance policies. References contacts (the client) and
+-- carriers (FK instead of free-text carrier name on commissions going forward).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.policies (
+  id                  uuid primary key default gen_random_uuid(),
+  user_id             uuid not null references public.users(id) on delete cascade,
+  contact_id          uuid references public.contacts(id) on delete set null,
+  carrier_id          uuid references public.carriers(id) on delete set null,
+  carrier_name        text not null,
+  product             text not null,
+  policy_type         text not null check (
+                        policy_type in ('final_expense', 'mortgage_protection', 'term', 'whole_life', 'universal_life')
+                      ),
+  face_amount         numeric(12,2),
+  premium             numeric(10,2),
+  premium_mode        text check (premium_mode in ('monthly', 'quarterly', 'semi_annual', 'annual')),
+  application_number  text,
+  policy_number       text,
+  status              text not null default 'pending' check (
+                        status in ('pending', 'issued', 'declined', 'withdrawn', 'lapsed', 'cancelled')
+                      ),
+  effective_date      date,
+  issue_date          date,
+  writing_agent       uuid references public.users(id) on delete set null,
+  commission_amount   numeric(10,2),
+  commission_rate     numeric(5,4),
+  renewal_schedule    jsonb not null default '[]',
+  notes               text,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create index policies_user_id_idx on public.policies(user_id);
+create index policies_contact_id_idx on public.policies(contact_id);
+create index policies_carrier_id_idx on public.policies(carrier_id);
+create index policies_status_idx on public.policies(status);
+create index policies_policy_number_idx on public.policies(policy_number);
+
+create trigger policies_set_updated_at
+  before update on public.policies
+  for each row execute function public.set_updated_at();
+
+alter table public.policies enable row level security;
+
+create policy "policies_select_own"
+  on public.policies for select
+  using (auth.uid() = user_id);
+
+create policy "policies_insert_own"
+  on public.policies for insert
+  with check (auth.uid() = user_id);
+
+create policy "policies_update_own"
+  on public.policies for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "policies_delete_own"
+  on public.policies for delete
+  using (auth.uid() = user_id);
+
+-- Link commissions to policies now that policies exist as a first-class table.
+alter table public.commissions
+  add column if not exists policy_id uuid references public.policies(id) on delete set null;
+
+create index if not exists commissions_policy_id_idx on public.commissions(policy_id);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- audit_logs — immutable record of sensitive actions (who did what, when).
+-- Insert-only from the app; no update/delete policies given to regular users.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.audit_logs (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid references public.users(id) on delete set null,
+  action      text not null,
+  entity_type text not null,
+  entity_id   uuid,
+  metadata    jsonb not null default '{}',
+  ip_address  text,
+  user_agent  text,
+  created_at  timestamptz not null default now()
+);
+
+create index audit_logs_user_id_idx on public.audit_logs(user_id);
+create index audit_logs_entity_idx on public.audit_logs(entity_type, entity_id);
+create index audit_logs_created_at_idx on public.audit_logs(created_at desc);
+
+alter table public.audit_logs enable row level security;
+
+create policy "audit_logs_select_own"
+  on public.audit_logs for select
+  using (auth.uid() = user_id);
+
+create policy "audit_logs_insert_own"
+  on public.audit_logs for insert
+  with check (auth.uid() = user_id);
+
+-- No update/delete policies: audit logs are append-only for regular users.
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- notifications — in-app notification feed per user.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.notifications (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.users(id) on delete cascade,
+  type        text not null check (
+                type in ('task_due', 'appointment_reminder', 'lead_assigned', 'commission_paid', 'system', 'policy_status_change')
+              ),
+  title       text not null,
+  body        text,
+  link        text,
+  read        boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
+create index notifications_user_id_idx on public.notifications(user_id);
+create index notifications_unread_idx on public.notifications(user_id, read) where read = false;
+
+alter table public.notifications enable row level security;
+
+create policy "notifications_select_own"
+  on public.notifications for select
+  using (auth.uid() = user_id);
+
+create policy "notifications_insert_own"
+  on public.notifications for insert
+  with check (auth.uid() = user_id);
+
+create policy "notifications_update_own"
+  on public.notifications for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "notifications_delete_own"
+  on public.notifications for delete
+  using (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- activity_feed — human-readable timeline of CRM events (separate from
+-- audit_logs, which is the security-focused immutable log). This is what
+-- powers "Recent activity" widgets.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.activity_feed (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.users(id) on delete cascade,
+  type        text not null check (
+                type in ('lead', 'client', 'policy', 'appointment', 'commission', 'task', 'call')
+              ),
+  entity_id   uuid,
+  text        text not null,
+  created_at  timestamptz not null default now()
+);
+
+create index activity_feed_user_id_idx on public.activity_feed(user_id, created_at desc);
+
+alter table public.activity_feed enable row level security;
+
+create policy "activity_feed_select_own"
+  on public.activity_feed for select
+  using (auth.uid() = user_id);
+
+create policy "activity_feed_insert_own"
+  on public.activity_feed for insert
+  with check (auth.uid() = user_id);
+
+create policy "activity_feed_delete_own"
+  on public.activity_feed for delete
+  using (auth.uid() = user_id);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Extend documents: carrier association, folders, tags, versioning, virus-scan
+-- status placeholder, and full-text search.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+alter table public.documents
+  add column if not exists carrier_id      uuid references public.carriers(id) on delete set null,
+  add column if not exists folder          text not null default 'general',
+  add column if not exists tags            text[] not null default '{}',
+  add column if not exists version         int not null default 1,
+  add column if not exists scan_status     text not null default 'pending' check (scan_status in ('pending', 'clean', 'flagged', 'error')),
+  add column if not exists original_filename text,
+  add column if not exists updated_at      timestamptz not null default now();
+
+create trigger documents_set_updated_at
+  before update on public.documents
+  for each row execute function public.set_updated_at();
+
+create index if not exists documents_carrier_id_idx on public.documents(carrier_id);
+create index if not exists documents_folder_idx on public.documents(folder);
+create index if not exists documents_scan_status_idx on public.documents(scan_status);
+
+-- search_vector: plain column + trigger, not a GENERATED ALWAYS column.
+-- to_tsvector('english', ...) cannot be used in a generated column because
+-- the text->regconfig cast (even written explicitly as ::regconfig) is
+-- STABLE, not IMMUTABLE, in Postgres — generated columns require a provably
+-- immutable expression. This is the standard Postgres/Supabase-safe pattern.
+alter table public.documents
+  add column if not exists search_vector tsvector;
+
+create or replace function public.documents_search_vector_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.search_vector := to_tsvector('english', coalesce(new.name, '') || ' ' || coalesce(array_to_string(new.tags, ' '), ''));
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_search_vector_trigger on public.documents;
+create trigger documents_search_vector_trigger
+  before insert or update of name, tags on public.documents
+  for each row execute function public.documents_search_vector_update();
+
+update public.documents
+set search_vector = to_tsvector('english', coalesce(name, '') || ' ' || coalesce(array_to_string(tags, ' '), ''))
+where search_vector is null;
+
+create index if not exists documents_search_idx on public.documents using gin(search_vector);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- document_versions — append-only version history. A new upload to an
+-- existing document inserts a row here and bumps documents.version, rather
+-- than overwriting the storage object in place.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.document_versions (
+  id            uuid primary key default gen_random_uuid(),
+  document_id   uuid not null references public.documents(id) on delete cascade,
+  user_id       uuid not null references public.users(id) on delete cascade,
+  version       int not null,
+  storage_path  text not null,
+  file_size     bigint,
+  mime_type     text,
+  created_at    timestamptz not null default now(),
+  unique (document_id, version)
+);
+
+create index document_versions_document_id_idx on public.document_versions(document_id);
+
+alter table public.document_versions enable row level security;
+
+create policy "document_versions_select_own"
+  on public.document_versions for select
+  using (auth.uid() = user_id);
+
+create policy "document_versions_insert_own"
+  on public.document_versions for insert
+  with check (auth.uid() = user_id);
+
+create policy "document_versions_delete_own"
+  on public.document_versions for delete
+  using (auth.uid() = user_id);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Enable pgvector and build the RAG schema: source documents, chunks with
+-- embeddings, a background embedding queue, category hierarchy, and search
+-- analytics. This replaces the filesystem-backed knowledge pipeline
+-- (lib/pipeline/*) as the system of record going forward.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create extension if not exists vector;
+
+-- ── knowledge_categories — hierarchical grouping (e.g. "Carriers" > "Americo") ─
+create table public.knowledge_categories (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.users(id) on delete cascade,
+  name        text not null,
+  parent_id   uuid references public.knowledge_categories(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  unique (user_id, parent_id, name)
+);
+
+create index knowledge_categories_user_id_idx on public.knowledge_categories(user_id);
+create index knowledge_categories_parent_id_idx on public.knowledge_categories(parent_id);
+
+alter table public.knowledge_categories enable row level security;
+
+create policy "knowledge_categories_select_own"
+  on public.knowledge_categories for select using (auth.uid() = user_id);
+create policy "knowledge_categories_insert_own"
+  on public.knowledge_categories for insert with check (auth.uid() = user_id);
+create policy "knowledge_categories_update_own"
+  on public.knowledge_categories for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "knowledge_categories_delete_own"
+  on public.knowledge_categories for delete using (auth.uid() = user_id);
+
+-- ── knowledge_documents — reference source material (carrier guides, ────────
+-- underwriting manuals, scripts, compliance rules, product docs, training) ──
+create table public.knowledge_documents (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references public.users(id) on delete cascade,
+  category_id     uuid references public.knowledge_categories(id) on delete set null,
+  carrier_id      uuid references public.carriers(id) on delete set null,
+  title           text not null,
+  source_type     text not null check (source_type in (
+                    'carrier_guide', 'underwriting_manual', 'script', 'objection_handling',
+                    'closing_technique', 'compliance', 'product_doc', 'training', 'other'
+                  )),
+  storage_path    text,
+  mime_type       text,
+  file_size       bigint,
+  raw_text        text,
+  status          text not null default 'processing' check (status in ('processing', 'ready', 'failed')),
+  version         int not null default 1,
+  tags            text[] not null default '{}',
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create index knowledge_documents_user_id_idx on public.knowledge_documents(user_id);
+create index knowledge_documents_category_id_idx on public.knowledge_documents(category_id);
+create index knowledge_documents_status_idx on public.knowledge_documents(status);
+create index knowledge_documents_source_type_idx on public.knowledge_documents(source_type);
+
+create trigger knowledge_documents_set_updated_at
+  before update on public.knowledge_documents
+  for each row execute function public.set_updated_at();
+
+alter table public.knowledge_documents enable row level security;
+
+create policy "knowledge_documents_select_own"
+  on public.knowledge_documents for select using (auth.uid() = user_id);
+create policy "knowledge_documents_insert_own"
+  on public.knowledge_documents for insert with check (auth.uid() = user_id);
+create policy "knowledge_documents_update_own"
+  on public.knowledge_documents for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "knowledge_documents_delete_own"
+  on public.knowledge_documents for delete using (auth.uid() = user_id);
+
+-- ── knowledge_chunks — chunked + embedded content. Polymorphic source: ──────
+-- either a knowledge_documents row (reference material) or a knowledge_base
+-- row (an extracted call insight), so both feed the same retrieval index. ──
+create table public.knowledge_chunks (
+  id                  uuid primary key default gen_random_uuid(),
+  user_id             uuid not null references public.users(id) on delete cascade,
+  document_id         uuid references public.knowledge_documents(id) on delete cascade,
+  knowledge_base_id   uuid references public.knowledge_base(id) on delete cascade,
+  chunk_index         int not null default 0,
+  content             text not null,
+  token_count         int,
+  embedding           vector(1536),
+  created_at          timestamptz not null default now(),
+  check (
+    (document_id is not null and knowledge_base_id is null) or
+    (document_id is null and knowledge_base_id is not null)
+  )
+);
+
+create index knowledge_chunks_user_id_idx on public.knowledge_chunks(user_id);
+create index knowledge_chunks_document_id_idx on public.knowledge_chunks(document_id);
+create index knowledge_chunks_knowledge_base_id_idx on public.knowledge_chunks(knowledge_base_id);
+
+-- ivfflat approximate-nearest-neighbor index for cosine similarity search.
+-- Requires ANALYZE after bulk inserts to build well; fine to create now since
+-- ivfflat tolerates an empty table (it just won't be well-tuned until data
+-- exists — `lists = 100` is a reasonable default for a single-tenant-per-row
+-- table in the thousands-of-chunks range, revisit if it grows past ~1M rows).
+create index knowledge_chunks_embedding_idx on public.knowledge_chunks
+  using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+
+alter table public.knowledge_chunks enable row level security;
+
+create policy "knowledge_chunks_select_own"
+  on public.knowledge_chunks for select using (auth.uid() = user_id);
+create policy "knowledge_chunks_insert_own"
+  on public.knowledge_chunks for insert with check (auth.uid() = user_id);
+create policy "knowledge_chunks_update_own"
+  on public.knowledge_chunks for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "knowledge_chunks_delete_own"
+  on public.knowledge_chunks for delete using (auth.uid() = user_id);
+
+-- ── embedding_queue — background processing queue. A row is enqueued on ────
+-- document upload / knowledge_base insert; a worker (API route invoked by a
+-- cron trigger — see note in app/api/knowledge/process-queue) claims pending
+-- rows, chunks + embeds them, and writes knowledge_chunks. ──────────────────
+create table public.embedding_queue (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references public.users(id) on delete cascade,
+  target_type   text not null check (target_type in ('knowledge_document', 'knowledge_base')),
+  target_id     uuid not null,
+  status        text not null default 'pending' check (status in ('pending', 'processing', 'done', 'failed')),
+  attempts      int not null default 0,
+  error         text,
+  created_at    timestamptz not null default now(),
+  processed_at  timestamptz
+);
+
+create index embedding_queue_status_idx on public.embedding_queue(status);
+create index embedding_queue_user_id_idx on public.embedding_queue(user_id);
+
+alter table public.embedding_queue enable row level security;
+
+create policy "embedding_queue_select_own"
+  on public.embedding_queue for select using (auth.uid() = user_id);
+create policy "embedding_queue_insert_own"
+  on public.embedding_queue for insert with check (auth.uid() = user_id);
+create policy "embedding_queue_update_own"
+  on public.embedding_queue for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "embedding_queue_delete_own"
+  on public.embedding_queue for delete using (auth.uid() = user_id);
+
+-- ── search_analytics — what agents search for and whether they found it ────
+create table public.search_analytics (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references public.users(id) on delete cascade,
+  query             text not null,
+  result_count      int not null default 0,
+  clicked_chunk_id  uuid references public.knowledge_chunks(id) on delete set null,
+  created_at        timestamptz not null default now()
+);
+
+create index search_analytics_user_id_idx on public.search_analytics(user_id, created_at desc);
+
+alter table public.search_analytics enable row level security;
+
+create policy "search_analytics_select_own"
+  on public.search_analytics for select using (auth.uid() = user_id);
+create policy "search_analytics_insert_own"
+  on public.search_analytics for insert with check (auth.uid() = user_id);
+
+-- ── coaching_history — conversational memory for the Agent Performance ─────
+-- Engine. Each row is a snapshot of the stats + recommendations generated at
+-- a point in time, so future coaching calls can reference trends instead of
+-- only the latest 30-day window. ────────────────────────────────────────────
+create table public.coaching_history (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references public.users(id) on delete cascade,
+  period_start      timestamptz not null,
+  period_end        timestamptz not null,
+  stats             jsonb not null default '{}',
+  recommendations   jsonb not null default '[]',
+  created_at        timestamptz not null default now()
+);
+
+create index coaching_history_user_id_idx on public.coaching_history(user_id, created_at desc);
+
+alter table public.coaching_history enable row level security;
+
+create policy "coaching_history_select_own"
+  on public.coaching_history for select using (auth.uid() = user_id);
+create policy "coaching_history_insert_own"
+  on public.coaching_history for insert with check (auth.uid() = user_id);
+
+-- ── RPC for cosine-similarity retrieval, callable via supabase-js .rpc() ────
+create or replace function public.match_knowledge_chunks(
+  query_embedding vector(1536),
+  match_user_id uuid,
+  match_count int default 6,
+  min_similarity float default 0.5
+)
+returns table (
+  id uuid,
+  content text,
+  similarity float,
+  document_id uuid,
+  knowledge_base_id uuid
+)
+language sql stable
+security invoker
+as $$
+  select
+    kc.id,
+    kc.content,
+    1 - (kc.embedding <=> query_embedding) as similarity,
+    kc.document_id,
+    kc.knowledge_base_id
+  from public.knowledge_chunks kc
+  where kc.user_id = match_user_id
+    and kc.embedding is not null
+    and 1 - (kc.embedding <=> query_embedding) >= min_similarity
+  order by kc.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- ── knowledge storage bucket — raw uploaded reference documents ────────────
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('knowledge', 'knowledge', false, 26214400, array[
+  'application/pdf', 'text/plain', 'text/markdown',
+  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+])
+on conflict (id) do nothing;
+
+create policy "knowledge_storage_owner_all"
+  on storage.objects for all
+  using (bucket_id = 'knowledge' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'knowledge' and (storage.foldername(name))[1] = auth.uid()::text);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Duplicate detection: store a content hash per document upload and flag
+-- exact duplicates for the same user at insert time (app-layer check uses
+-- this index; see lib/documents/hash.ts + app/api/documents POST handler).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+alter table public.documents
+  add column if not exists file_hash text;
+
+create index if not exists documents_user_hash_idx on public.documents(user_id, file_hash);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- pipeline_logs — system-level processing telemetry, distinct from audit_logs
+-- (which is the security/user-action trail). Tracks ingestion, embedding,
+-- queue, and search-latency events for monitoring/debugging.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.pipeline_logs (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid references public.users(id) on delete cascade,
+  event_type    text not null check (event_type in (
+                  'upload_failure', 'extraction_failure', 'embedding_failure',
+                  'queue_failure', 'processing_complete', 'search_latency'
+                )),
+  target_type   text,
+  target_id     uuid,
+  duration_ms   int,
+  message       text,
+  metadata      jsonb not null default '{}',
+  created_at    timestamptz not null default now()
+);
+
+create index pipeline_logs_user_id_idx on public.pipeline_logs(user_id, created_at desc);
+create index pipeline_logs_event_type_idx on public.pipeline_logs(event_type);
+
+alter table public.pipeline_logs enable row level security;
+
+create policy "pipeline_logs_select_own"
+  on public.pipeline_logs for select using (auth.uid() = user_id);
+create policy "pipeline_logs_insert_own"
+  on public.pipeline_logs for insert with check (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Keyword search support on knowledge_documents (complements the semantic
+-- pgvector search on knowledge_chunks) for hybrid ranking.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- search_vector: plain column + trigger, not a GENERATED ALWAYS column —
+-- see the matching note in migration 20 for why (to_tsvector's regconfig
+-- cast is STABLE, not IMMUTABLE, so it can't be used in a generated column).
+alter table public.knowledge_documents
+  add column if not exists search_vector tsvector;
+
+create or replace function public.knowledge_documents_search_vector_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.search_vector := to_tsvector(
+    'english',
+    coalesce(new.title, '') || ' ' || coalesce(new.raw_text, '') || ' ' || coalesce(array_to_string(new.tags, ' '), '')
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists knowledge_documents_search_vector_trigger on public.knowledge_documents;
+create trigger knowledge_documents_search_vector_trigger
+  before insert or update of title, raw_text, tags on public.knowledge_documents
+  for each row execute function public.knowledge_documents_search_vector_update();
+
+update public.knowledge_documents
+set search_vector = to_tsvector(
+  'english',
+  coalesce(title, '') || ' ' || coalesce(raw_text, '') || ' ' || coalesce(array_to_string(tags, ' '), '')
+)
+where search_vector is null;
+
+create index if not exists knowledge_documents_search_idx on public.knowledge_documents using gin(search_vector);
+-- ─────────────────────────────────────────────────────────────────────────────
+-- knowledge_jobs — tracks call-transcript → insight-extraction processing
+-- (the Knowledge Center "Upload" tab), replacing the filesystem job queue.
+-- Distinct from embedding_queue (which handles chunk/embed for already-
+-- approved knowledge + reference documents).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create table public.knowledge_jobs (
+  id                  uuid primary key default gen_random_uuid(),
+  user_id             uuid not null references public.users(id) on delete cascade,
+  original_name       text not null,
+  format              text not null,
+  status              text not null default 'queued' check (status in (
+                        'queued', 'parsing', 'extracting', 'deduplicating',
+                        'pending_review', 'completed', 'failed'
+                      )),
+  progress            int not null default 0,
+  error               text,
+  retry_count         int not null default 0,
+  word_count          int,
+  extracted_count     int,
+  new_knowledge_count int,
+  call_type           text,
+  call_outcome        text,
+  call_score          int,
+  started_at          timestamptz,
+  completed_at        timestamptz,
+  created_at          timestamptz not null default now()
+);
+
+create index knowledge_jobs_user_id_idx on public.knowledge_jobs(user_id, created_at desc);
+create index knowledge_jobs_status_idx on public.knowledge_jobs(status);
+
+alter table public.knowledge_jobs enable row level security;
+
+create policy "knowledge_jobs_select_own"
+  on public.knowledge_jobs for select using (auth.uid() = user_id);
+create policy "knowledge_jobs_insert_own"
+  on public.knowledge_jobs for insert with check (auth.uid() = user_id);
+create policy "knowledge_jobs_update_own"
+  on public.knowledge_jobs for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "knowledge_jobs_delete_own"
+  on public.knowledge_jobs for delete using (auth.uid() = user_id);
+
+-- Link knowledge_base entries back to the job that produced them (the column
+-- already exists as text `job_id` from migration 12 — add a real FK-friendly
+-- uuid column alongside it for joins, keeping job_id as a free-text label for
+-- backward compat with any already-approved rows).
+alter table public.knowledge_base
+  add column if not exists knowledge_job_id uuid references public.knowledge_jobs(id) on delete set null;
+
+create index if not exists knowledge_base_knowledge_job_id_idx on public.knowledge_base(knowledge_job_id);

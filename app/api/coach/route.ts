@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { COACH_SYSTEM_PROMPT, UNDERWRITING_EXTRACT_PROMPT, STAGE_DETECTION_PROMPT } from '@/lib/coach-prompts';
+import { requireUser } from '@/lib/api/guard';
+import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
 
 export async function POST(req: NextRequest) {
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
+
   const { transcript, fullLength } = await req.json() as { transcript: string; fullLength: number };
 
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
@@ -13,6 +18,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(getDemoInsight(fullLength));
   }
 
+  // RAG: ground coaching in the agent's own carrier guides, scripts, objection
+  // handling, and compliance docs instead of relying purely on model memory.
+  // Best-effort — never blocks coaching if retrieval fails or finds nothing.
+  const lastTurns = transcript.split('\n').slice(-6).join('\n');
+  const retrievedChunks = await retrieveRelevantChunks(supabase, user.id, lastTurns, { matchCount: 4, minSimilarity: 0.45 }).catch(() => []);
+  const ragContext = formatChunksForPrompt(retrievedChunks);
+
   try {
     const [coachRes, underwritingRes, stageRes] = await Promise.all([
       // Coach insight
@@ -20,6 +32,9 @@ export async function POST(req: NextRequest) {
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: COACH_SYSTEM_PROMPT },
+          ...(ragContext
+            ? [{ role: 'system' as const, content: `Relevant material from this agent's own carrier guides, scripts, and objection-handling docs — prefer this over general knowledge when it applies:\n\n${ragContext}` }]
+            : []),
           { role: 'user', content: `Current conversation:\n\n${transcript}\n\nAnalyze this and respond in the exact JSON format specified.` },
         ],
         temperature: 0.3,
@@ -73,7 +88,13 @@ export async function POST(req: NextRequest) {
     const validStages = ['introduction','permission','discovery','existing_coverage','health','budget','presentation','objections','close'];
     const stage = validStages.includes(stageText) ? stageText : 'introduction';
 
-    return NextResponse.json({ insight, underwriting, stage, checklist });
+    return NextResponse.json({
+      insight,
+      underwriting,
+      stage,
+      checklist,
+      ragSources: retrievedChunks.map((c) => ({ id: c.id, similarity: c.similarity })),
+    });
   } catch (err) {
     console.error('Coach API error:', err);
     return NextResponse.json(getDemoInsight(fullLength));

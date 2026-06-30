@@ -1,7 +1,14 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { signOut } from '@/app/(auth)/actions';
+
+type MeResponse = {
+  user: { email: string; fullName: string | null; role: string };
+  todayStats: { calls: number; appointments: number; policiesWritten: number; avgScore: number | null };
+};
 
 const navItems = [
   { href: '/dashboard',      label: 'Dashboard',      icon: GridIcon },
@@ -18,13 +25,6 @@ const navItems = [
   { href: '/settings',        label: 'Settings',       icon: SettingsIcon },
 ];
 
-const stats = [
-  { label: "Today's Calls", value: '6' },
-  { label: 'Appointments',  value: '3' },
-  { label: 'Policies',      value: '2' },
-  { label: 'Avg Score',     value: '79%' },
-];
-
 interface SidebarProps {
   collapsed?: boolean;
   onToggle?: () => void;
@@ -32,6 +32,24 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const [me, setMe] = useState<MeResponse | null>(null);
+
+  useEffect(() => {
+    fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then(setMe).catch(() => setMe(null));
+  }, []);
+
+  const stats = [
+    { label: "Today's Calls", value: me ? String(me.todayStats.calls) : '—' },
+    { label: 'Appointments',  value: me ? String(me.todayStats.appointments) : '—' },
+    { label: 'Policies',      value: me ? String(me.todayStats.policiesWritten) : '—' },
+    { label: 'Avg Score',     value: me?.todayStats.avgScore != null ? `${me.todayStats.avgScore}%` : '—' },
+  ];
+
+  const displayName = me?.user.fullName || me?.user.email?.split('@')[0] || '—';
+  const initials = displayName !== '—'
+    ? displayName.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
+    : '··';
+  const roleLabel = me?.user.role ? me.user.role.charAt(0).toUpperCase() + me.user.role.slice(1) : 'Agent';
 
   return (
     <aside className={`
@@ -100,7 +118,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       {/* Stats */}
       {!collapsed && (
         <div className="px-3 py-3 border-t border-white/6 space-y-2">
-          <p className="text-[9px] font-semibold text-slate-600 uppercase tracking-widest px-1 mb-2">Today's Stats</p>
+          <p className="text-[9px] font-semibold text-slate-600 uppercase tracking-widest px-1 mb-2">Today&apos;s Stats</p>
           <div className="grid grid-cols-2 gap-1.5">
             {stats.map((s) => (
               <div key={s.label} className="rounded-lg px-2.5 py-2 bg-white/4 border border-white/6">
@@ -121,18 +139,25 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
 
       {/* User */}
       <div className="p-3 border-t border-white/6">
-        <div className={`flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer ${collapsed ? 'justify-center' : ''}`}>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[#090d18] text-xs font-extrabold"
-            style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
-            CK
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-slate-200 truncate">Courtney K.</p>
-              <p className="text-[10px] text-slate-500 truncate">Final Expense Agent</p>
+        <form action={signOut}>
+          <button
+            type="submit"
+            title={collapsed ? 'Sign out' : undefined}
+            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors text-left ${collapsed ? 'justify-center' : ''}`}
+          >
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[#090d18] text-xs font-extrabold"
+              style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
+              {initials}
             </div>
-          )}
-        </div>
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-slate-200 truncate">{displayName}</p>
+                <p className="text-[10px] text-slate-500 truncate">Final Expense {roleLabel}</p>
+              </div>
+            )}
+            {!collapsed && <SignOutIcon />}
+          </button>
+        </form>
       </div>
     </aside>
   );
@@ -266,6 +291,16 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       {collapsed ? <polyline points="9 18 15 12 9 6"/> : <polyline points="15 18 9 12 15 6"/>}
+    </svg>
+  );
+}
+
+function SignOutIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 text-slate-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+      <polyline points="16 17 21 12 16 7"/>
+      <line x1="21" y1="12" x2="9" y2="12"/>
     </svg>
   );
 }

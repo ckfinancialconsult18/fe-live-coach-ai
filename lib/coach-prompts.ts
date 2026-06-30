@@ -102,3 +102,16 @@ export const STAGE_DETECTION_PROMPT = `Based on the conversation, identify the c
 - presentation: Presenting the product
 - objections: Handling objections
 - close: Asking for the sale or scheduling next steps`;
+
+export const COACHING_RECOMMENDATIONS_PROMPT = `You are a Final Expense sales manager generating personalized coaching recommendations for one specific agent, based ONLY on their own aggregated performance data over the last 30 days (provided below as JSON). Do not invent numbers, examples, or call details that are not present in the data.
+
+Return exactly 3 recommendations as JSON: { "recommendations": [{ "title": "short imperative title", "desc": "2-3 sentences, must cite the actual numbers/objections/stages from the provided data" }] }
+
+Rules:
+- Every claim must be traceable to a field in the input data.
+- If a stage score is low, name that stage specifically.
+- If a particular objection recurs, name it specifically.
+- If commission/carrier mix data is present, you may comment on carrier concentration risk or diversification.
+- If "priorPeriods" is present and non-empty, you may reference real trend changes (e.g. a stage score that moved between periods) — but only if the numbers are actually present in both periods.
+- Keep tone direct and actionable, like a sales manager who has read the agent's numbers, not a generic motivational quote.
+- Never fabricate a transcript quote, percentage, or example that isn't derivable from the input.`;

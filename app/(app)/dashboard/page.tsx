@@ -1,33 +1,87 @@
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/server';
 
 export const metadata = { title: 'Dashboard' };
 
-const kpis = [
-  { label: "Today's Calls",    value: '6',   sub: '2 policies written', color: '#D4AF37', icon: PhoneIcon },
-  { label: 'Appointments',     value: '3',   sub: '1 in 45 minutes',    color: '#22c55e', icon: CalendarIcon },
-  { label: 'Policies Written', value: '2',   sub: '$84/mo premium',     color: '#a78bfa', icon: ShieldIcon },
-  { label: 'Avg Call Score',   value: '79%', sub: '+4pts this week',    color: '#06b6d4', icon: TrendIcon },
-];
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
 
-const recentCalls = [
-  { name: 'Dorothy Williams', time: '2:30 PM',    score: 82, outcome: 'Policy Written',  cls: 'text-green-400' },
-  { name: 'Robert Martinez',  time: '11:15 AM',   score: 51, outcome: 'Follow Up',       cls: 'text-amber-400' },
-  { name: 'Helen Johnson',    time: 'Yesterday',  score: 91, outcome: 'Policy Written',  cls: 'text-green-400' },
-  { name: 'James Thompson',   time: 'Yesterday',  score: 34, outcome: 'Not Interested',  cls: 'text-red-400' },
-];
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
+}
+function endOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).toISOString();
+}
+function startOfWeek(d: Date) {
+  const day = d.getDay();
+  const start = new Date(d);
+  start.setDate(d.getDate() - day);
+  return startOfDay(start);
+}
 
-const upcomingAppts = [
-  { name: 'Betty Crawford', time: '3:15 PM',            type: 'Phone' },
-  { name: 'Earl Stevens',   time: '4:00 PM',            type: 'Phone' },
-  { name: 'Marie Lopez',    time: 'Tomorrow 10:00 AM',  type: 'Phone' },
-];
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const today = new Date();
+  const todayStart = startOfDay(today);
+  const todayEnd = endOfDay(today);
+  const weekStart = startOfWeek(today);
+  const monthKey = today.toISOString().slice(0, 7);
 
-export default function DashboardPage() {
+  const [callsToday, callsThisWeek, apptsToday, commissionsThisMonth, recentCallsRaw] = await Promise.all([
+    supabase.from('calls').select('id, outcome').gte('started_at', todayStart).lte('started_at', todayEnd),
+    supabase.from('call_scores').select('overall_score, created_at').gte('created_at', weekStart),
+    supabase.from('appointments').select('*').gte('start_time', todayStart).lte('start_time', todayEnd).eq('status', 'scheduled').order('start_time'),
+    supabase.from('commissions').select('amount').eq('month', monthKey),
+    supabase.from('calls').select('id, contact_id, started_at, outcome, call_scores(overall_score)').order('started_at', { ascending: false }).limit(4),
+  ]);
+
+  const contactIds = [
+    ...(apptsToday.data ?? []).map((a) => a.contact_id),
+    ...(recentCallsRaw.data ?? []).map((c) => c.contact_id),
+  ].filter((id): id is string => !!id);
+  const { data: contacts } = contactIds.length
+    ? await supabase.from('contacts').select('id, first_name, last_name').in('id', contactIds)
+    : { data: [] as { id: string; first_name: string; last_name: string }[] };
+  const contactName = (id: string | null) => {
+    const c = contacts?.find((x) => x.id === id);
+    return c ? `${c.first_name} ${c.last_name}` : 'Unknown';
+  };
+
+  const policiesToday = (callsToday.data ?? []).filter((c) => c.outcome === 'policy_written').length;
+  const avgScore = callsThisWeek.data?.length
+    ? Math.round(callsThisWeek.data.reduce((s, c) => s + (c.overall_score ?? 0), 0) / callsThisWeek.data.length)
+    : 0;
+  const monthlyCommission = (commissionsThisMonth.data ?? []).reduce((s, c) => s + Number(c.amount), 0);
+
+  const kpis = [
+    { label: "Today's Calls", value: String((callsToday.data ?? []).length), sub: `${policiesToday} policies written`, color: '#D4AF37', icon: PhoneIcon },
+    { label: 'Appointments', value: String((apptsToday.data ?? []).length), sub: (apptsToday.data ?? [])[0] ? `Next at ${fmtTime((apptsToday.data ?? [])[0].start_time)}` : 'None scheduled', color: '#22c55e', icon: CalendarIcon },
+    { label: 'Policies Written', value: String(policiesToday), sub: `$${monthlyCommission.toLocaleString()} commission MTD`, color: '#a78bfa', icon: ShieldIcon },
+    { label: 'Avg Call Score', value: `${avgScore}%`, sub: 'This week', color: '#06b6d4', icon: TrendIcon },
+  ];
+
+  const recentCalls = (recentCallsRaw.data ?? []).map((c) => ({
+    id: c.id,
+    name: contactName(c.contact_id),
+    time: fmtTime(c.started_at),
+    score: (c.call_scores as unknown as { overall_score: number }[] | null)?.[0]?.overall_score ?? null,
+    outcome: c.outcome ?? 'pending',
+  }));
+
+  const upcomingAppts = (apptsToday.data ?? []).map((a) => ({
+    id: a.id,
+    name: a.contact_id ? contactName(a.contact_id) : a.title,
+    time: fmtTime(a.start_time),
+    type: a.type,
+  }));
+
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div className="animate-fade-in-up">
-        <h2 className="text-2xl font-bold text-slate-100">Good afternoon, Courtney</h2>
-        <p className="text-sm text-slate-500 mt-1">You have 3 appointments today and 2 policies written this week.</p>
+        <h2 className="text-2xl font-bold text-slate-100">Good afternoon{user?.email ? `, ${user.email.split('@')[0]}` : ''}</h2>
+        <p className="text-sm text-slate-500 mt-1">You have {upcomingAppts.length} appointments today and {policiesToday} policies written today.</p>
       </div>
 
       {/* Start Call CTA */}
@@ -85,20 +139,21 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-2">
             {recentCalls.map((c) => (
-              <div key={c.name} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">
+              <div key={c.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">
                 <div className="w-8 h-8 rounded-full bg-white/8 border border-white/10 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
-                  {c.name.split(' ').map((n) => n[0]).join('')}
+                  {c.name.split(' ').map((n: string) => n[0]).join('')}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-200">{c.name}</p>
                   <p className="text-xs text-slate-500">{c.time}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-bold text-slate-200">{c.score}</p>
-                  <p className={`text-[10px] font-medium ${c.cls}`}>{c.outcome}</p>
+                  <p className="text-sm font-bold text-slate-200">{c.score ?? '—'}</p>
+                  <p className="text-[10px] font-medium text-slate-400">{c.outcome.replace(/_/g, ' ')}</p>
                 </div>
               </div>
             ))}
+            {recentCalls.length === 0 && <p className="text-sm text-slate-600 text-center py-6">No calls yet</p>}
           </div>
         </div>
 
@@ -112,7 +167,7 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-2">
             {upcomingAppts.map((a) => (
-              <div key={a.name} className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/4 border border-white/6">
+              <div key={a.id} className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/4 border border-white/6">
                 <div className="w-9 h-9 rounded-lg bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
                   <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12"/>
@@ -120,7 +175,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-200">{a.name}</p>
-                  <p className="text-xs text-slate-500">{a.type} · {a.time}</p>
+                  <p className="text-xs text-slate-500 capitalize">{a.type.replace('_', ' ')} · {a.time}</p>
                 </div>
                 <Link href="/live-call"
                   className="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors"
@@ -129,6 +184,7 @@ export default function DashboardPage() {
                 </Link>
               </div>
             ))}
+            {upcomingAppts.length === 0 && <p className="text-sm text-slate-600 text-center py-6">No appointments today</p>}
           </div>
         </div>
       </div>

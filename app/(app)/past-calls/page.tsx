@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { mockPastCalls, formatDuration } from '@/lib/mock-calls';
+import { useState, useEffect } from 'react';
+import { formatDuration } from '@/lib/mock-calls';
+import type { CallRecord } from '@/lib/types';
 
 const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {
   policy_written: { label: 'Policy Written', cls: 'text-green-400 bg-green-500/10 border-green-500/20' },
@@ -11,8 +12,15 @@ const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {
 };
 
 export default function PastCallsPage() {
+  const [calls, setCalls] = useState<CallRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const call = mockPastCalls.find((c) => c.id === selected);
+  const call = calls.find((c) => c.id === selected);
+
+  useEffect(() => {
+    fetch('/api/calls')
+      .then((r) => r.json())
+      .then((d) => setCalls((d.calls ?? []).map((c: Omit<CallRecord, 'date'> & { date: string }) => ({ ...c, date: new Date(c.date) }))));
+  }, []);
 
   function scoreColor(s: number) {
     return s >= 80 ? '#22c55e' : s >= 60 ? '#D4AF37' : '#ef4444';
@@ -24,9 +32,9 @@ export default function PastCallsPage() {
       <div className="flex flex-col w-96 shrink-0 space-y-2 overflow-y-auto">
         <div className="mb-1">
           <h2 className="text-lg font-bold text-slate-100">Past Calls</h2>
-          <p className="text-xs text-slate-500">{mockPastCalls.length} calls</p>
+          <p className="text-xs text-slate-500">{calls.length} calls</p>
         </div>
-        {mockPastCalls.map((c) => {
+        {calls.map((c) => {
           const oc = OUTCOME_LABELS[c.outcome];
           return (
             <button

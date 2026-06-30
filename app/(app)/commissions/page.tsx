@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
-import { mockCommissions } from '@/lib/mock-data';
+import { createClient } from '@/lib/supabase/server';
+import { commissionFromRow } from '@/lib/api/mappers';
 
 function fmt(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
@@ -8,23 +9,32 @@ function fmt(n: number) {
 
 export const metadata = { title: 'Commissions' };
 
-export default function CommissionsPage() {
-  const paid = mockCommissions.filter((c) => c.status === 'paid');
-  const pending = mockCommissions.filter((c) => c.status === 'pending');
+export default async function CommissionsPage() {
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from('commissions')
+    .select('*')
+    .order('month', { ascending: false });
+
+  const commissions = (rows ?? []).map(commissionFromRow);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  const paid = commissions.filter((c) => c.status === 'paid');
+  const pending = commissions.filter((c) => c.status === 'pending');
 
   const totalPaid = paid.reduce((s, c) => s + c.amount, 0);
   const totalPending = pending.reduce((s, c) => s + c.amount, 0);
-  const totalAll = mockCommissions.reduce((s, c) => s + c.amount, 0);
+  const totalAll = commissions.reduce((s, c) => s + c.amount, 0);
 
   // by carrier
   const byCarrier: Record<string, number> = {};
-  mockCommissions.forEach((c) => {
+  commissions.forEach((c) => {
     byCarrier[c.carrier] = (byCarrier[c.carrier] ?? 0) + c.amount;
   });
 
   // by month
   const byMonth: Record<string, number> = {};
-  mockCommissions.forEach((c) => {
+  commissions.forEach((c) => {
     byMonth[c.month] = (byMonth[c.month] ?? 0) + c.amount;
   });
 
@@ -36,7 +46,7 @@ export default function CommissionsPage() {
           { label: 'Total Earned',  value: fmt(totalAll),     color: 'text-slate-200',  bg: 'bg-white/5',         border: 'border-white/8' },
           { label: 'Paid',          value: fmt(totalPaid),    color: 'text-green-400',  bg: 'bg-green-500/8',     border: 'border-green-500/15' },
           { label: 'Pending',       value: fmt(totalPending), color: 'text-amber-400',  bg: 'bg-amber-500/8',     border: 'border-amber-500/15' },
-          { label: 'This Month',    value: fmt(mockCommissions.filter((c) => c.month === '2026-06').reduce((s, c) => s + c.amount, 0)), color: 'text-blue-400', bg: 'bg-blue-500/8', border: 'border-blue-500/15' },
+          { label: 'This Month',    value: fmt(commissions.filter((c) => c.month === currentMonth).reduce((s, c) => s + c.amount, 0)), color: 'text-blue-400', bg: 'bg-blue-500/8', border: 'border-blue-500/15' },
         ].map((s) => (
           <div key={s.label} className={`rounded-2xl p-5 border ${s.bg} ${s.border}`}>
             <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{s.label}</p>
@@ -135,7 +145,7 @@ export default function CommissionsPage() {
               </tr>
             </thead>
             <tbody>
-              {mockCommissions.map((c, i) => (
+              {commissions.map((c, i) => (
                 <tr key={c.id} className={`border-b border-white/4 hover:bg-white/4 transition-colors ${i % 2 === 0 ? '' : 'bg-white/2'}`}>
                   <td className="px-4 py-3 font-medium text-slate-200">{c.clientName}</td>
                   <td className="px-4 py-3 text-slate-400">{c.carrier}</td>
@@ -152,6 +162,9 @@ export default function CommissionsPage() {
                   <td className="px-4 py-3 text-slate-500">{c.paidDate ?? '—'}</td>
                 </tr>
               ))}
+              {commissions.length === 0 && (
+                <tr><td colSpan={7} className="text-center py-12 text-slate-600">No commissions yet</td></tr>
+              )}
             </tbody>
           </table>
         </div>

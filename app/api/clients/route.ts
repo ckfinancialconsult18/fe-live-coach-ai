@@ -1,0 +1,59 @@
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+
+export async function GET() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: clients, error } = await supabase
+    .from('clients')
+    .select('*')
+    .order('updated_at', { ascending: false });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const contactIds = (clients ?? []).map((c) => c.id);
+  const { data: policies } = contactIds.length
+    ? await supabase.from('policies').select('*').in('contact_id', contactIds)
+    : { data: [] as any[] };
+
+  const mapped = (clients ?? []).map((c) => ({
+    id: c.id,
+    firstName: c.first_name,
+    lastName: c.last_name,
+    email: c.email ?? '',
+    phone: c.phone ?? '',
+    dob: c.dob ?? '',
+    address: c.address ?? '',
+    city: c.city ?? '',
+    state: c.state ?? '',
+    zip: c.zip ?? '',
+    beneficiaries: c.beneficiary_name
+      ? [{ id: `${c.id}-b1`, name: c.beneficiary_name, relationship: c.beneficiary_relationship ?? '', percentage: 100 }]
+      : [],
+    existingCoverage: c.existing_coverage ?? '',
+    medicalNotes: c.medical_notes ?? '',
+    createdAt: c.created_at,
+    policies: (policies ?? []).filter((p) => p.contact_id === c.id).map((p) => p.id),
+  }));
+
+  const mappedPolicies = (policies ?? []).map((p: any) => ({
+    id: p.id,
+    clientId: p.contact_id,
+    clientName: '',
+    type: p.policy_type,
+    carrier: p.carrier_name,
+    policyNumber: p.policy_number ?? '',
+    faceAmount: Number(p.face_amount ?? 0),
+    premium: Number(p.premium ?? 0),
+    commission: Number(p.commission_amount ?? 0),
+    commissionRate: Number(p.commission_rate ?? 0),
+    status: p.status,
+    effectiveDate: p.effective_date ?? '',
+    issueDate: p.issue_date ?? '',
+    notes: p.notes ?? '',
+  }));
+
+  return NextResponse.json({ clients: mapped, policies: mappedPolicies });
+}

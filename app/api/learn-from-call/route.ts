@@ -3,6 +3,7 @@ import { readAllKnowledge, appendToKnowledgeFile, compactIndex } from '@/lib/kno
 import type { KnowledgeKey } from '@/lib/knowledge-reader';
 import { buildLearnPrompt } from '@/lib/learn-prompts';
 import { getOpenAI } from '@/lib/openai';
+import { requireUser } from '@/lib/api/guard';
 
 export const runtime = 'nodejs';
 
@@ -20,6 +21,9 @@ const FILE_KEY_MAP: Record<string, KnowledgeKey> = {
 };
 
 export async function POST(req: NextRequest) {
+  const { user, response } = await requireUser();
+  if (!user) return response;
+
   try {
     const { transcript, sourceCall } = await req.json() as { transcript: string; sourceCall?: string };
 

@@ -1,16 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { mockClients, mockPolicies } from '@/lib/mock-data';
+import type { Client, Policy } from '@/lib/types';
 
 export default function ClientsPage() {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [policies, setPolicies] = useState<Policy[]>([]);
   const [search, setSearch] = useState('');
 
-  const filtered = mockClients.filter((c) => {
+  useEffect(() => {
+    fetch('/api/clients')
+      .then((r) => r.json())
+      .then((d) => { setClients(d.clients ?? []); setPolicies(d.policies ?? []); });
+  }, []);
+
+  const filtered = clients.filter((c) => {
     const q = search.toLowerCase();
     return !q || `${c.firstName} ${c.lastName} ${c.email} ${c.city} ${c.state}`.toLowerCase().includes(q);
   });
@@ -35,9 +42,9 @@ export default function ClientsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {filtered.map((client) => {
-          const clientPolicies = mockPolicies.filter((p) => p.clientId === client.id);
+          const clientPolicies = policies.filter((p) => p.clientId === client.id);
           const totalPremium = clientPolicies.reduce((sum, p) => sum + p.premium, 0);
-          const age = new Date().getFullYear() - new Date(client.dob).getFullYear();
+          const age = client.dob ? new Date().getFullYear() - new Date(client.dob).getFullYear() : null;
 
           return (
             <Link key={client.id} href={`/clients/${client.id}`}>
@@ -62,7 +69,7 @@ export default function ClientsPage() {
                 {/* Details grid */}
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    ['Age', `${age} yrs`],
+                    ['Age', age !== null ? `${age} yrs` : '—'],
                     ['Location', `${client.city}, ${client.state}`],
                     ['DOB', client.dob],
                     ['Monthly Premium', `$${totalPremium.toFixed(0)}`],

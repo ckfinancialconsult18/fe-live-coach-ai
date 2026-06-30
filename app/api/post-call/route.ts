@@ -1,35 +1,87 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
+import { createClient } from '@/lib/supabase/server';
+
+async function persistCall(transcript: string, duration: number, metrics: any, report: any) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const now = new Date();
+  const startedAt = new Date(now.getTime() - (duration ?? 0) * 1000).toISOString();
+  const { data: call, error: callErr } = await supabase
+    .from('calls')
+    .insert({
+      user_id: user.id,
+      call_type: 'sales',
+      outcome: report.overallScore >= 70 ? 'follow_up' : 'follow_up',
+      duration_seconds: duration ?? 0,
+      transcript: { raw: transcript },
+      metrics: metrics ?? {},
+      started_at: startedAt,
+      ended_at: now.toISOString(),
+    })
+    .select()
+    .single();
+  if (callErr || !call) return null;
+
+  await supabase.from('call_scores').insert({
+    user_id: user.id,
+    call_id: call.id,
+    overall_score: report.overallScore ?? 0,
+    scores: report.scores ?? {},
+    strengths: report.strengths ?? [],
+    missed_opportunities: report.missedOpportunities ?? [],
+    buying_signals: report.buyingSignals ?? [],
+    objections: report.objections ?? [],
+    summary: report.summary ?? '',
+    follow_up_text: report.followUpText ?? '',
+    follow_up_email: report.followUpEmail ?? '',
+    crm_notes: report.crmNotes ?? '',
+    improvement_plan: report.improvementPlan ?? [],
+  });
+
+  return call.id;
+}
 
 export async function POST(req: NextRequest) {
-  const { transcript } = await req.json() as { transcript: string };
+  const { transcript, duration, metrics } = await req.json() as { transcript: string; duration?: number; metrics?: any };
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
   const apiKey = process.env.OPENAI_API_KEY;
+  let report: any;
+
   if (!apiKey) {
-    return NextResponse.json(getDemoReport());
+    report = getDemoReport();
+  } else {
+    try {
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: POST_CALL_PROMPT },
+          { role: 'user', content: `Full transcript:\n\n${transcript}` },
+        ],
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+      });
+
+      const content = res.choices[0]?.message?.content ?? '{}';
+      try { report = JSON.parse(content); } catch { report = getDemoReport(); }
+    } catch (err) {
+      console.error('Post-call API error:', err);
+      report = getDemoReport();
+    }
   }
 
   try {
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: POST_CALL_PROMPT },
-        { role: 'user', content: `Full transcript:\n\n${transcript}` },
-      ],
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-    });
-
-    const content = res.choices[0]?.message?.content ?? '{}';
-    let report = {};
-    try { report = JSON.parse(content); } catch { /* keep empty */ }
-    return NextResponse.json(report);
+    const callId = await persistCall(transcript, duration ?? 0, metrics, report);
+    if (callId) report.callId = callId;
   } catch (err) {
-    console.error('Post-call API error:', err);
-    return NextResponse.json(getDemoReport());
+    console.error('Failed to persist call to Supabase:', err);
   }
+
+  return NextResponse.json(report);
 }
 
 function getDemoReport() {
