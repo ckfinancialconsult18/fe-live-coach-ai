@@ -22,6 +22,36 @@ import { scoreColor } from '@/lib/score-color';
 
 let timelineEventId = 0;
 
+// ── Pre-flight configuration check ────────────────────────────────────────────
+
+type StatusCheck = { ok: boolean; message: string };
+type PreflightResult = { ok: boolean; checks: Record<string, StatusCheck> } | null;
+
+function PreflightPanel({ result, onDismiss }: { result: PreflightResult; onDismiss: () => void }) {
+  if (!result || result.ok) return null;
+  const failed = Object.entries(result.checks).filter(([, v]) => !v.ok);
+  return (
+    <div className="mx-4 mt-3 rounded-2xl border border-red-500/25 bg-red-500/8 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-red-400">Live Call cannot start — configuration required</p>
+        <button onClick={onDismiss} className="text-slate-500 hover:text-slate-300 text-xs">Dismiss</button>
+      </div>
+      {failed.map(([key, check]) => (
+        <div key={key} className="flex gap-2.5 text-xs">
+          <span className="text-red-400 shrink-0 mt-0.5">✗</span>
+          <div className="space-y-0.5">
+            <p className="font-semibold text-red-300">{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</p>
+            <p className="text-slate-400 leading-relaxed">{check.message}</p>
+          </div>
+        </div>
+      ))}
+      <p className="text-[10px] text-slate-500 pt-1 border-t border-white/6">
+        After fixing these, restart the dev server or redeploy on Vercel, then refresh this page.
+      </p>
+    </div>
+  );
+}
+
 export default function LiveCallPage() {
   const mic = useMicrophone();
   const {
@@ -38,6 +68,8 @@ export default function LiveCallPage() {
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [momentum, setMomentum] = useState(0);
+  const [preflight, setPreflight] = useState<PreflightResult>(null);
+  const [showPreflight, setShowPreflight] = useState(true);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef = useRef<number>(0);
@@ -46,6 +78,25 @@ export default function LiveCallPage() {
   const seenStagesRef = useRef<Set<string>>(new Set());
   const readyForAppFiredRef = useRef(false);
   const closeOpportunityHistoryRef = useRef<{ value: number; atMs: number }[]>([]);
+
+  // Pre-flight check: verify all requirements before the user clicks Start Call
+  // so failures surface with exact, actionable messages rather than mid-call.
+  useEffect(() => {
+    fetch('/api/live-call-status')
+      .then((r) => r.json())
+      .then((data: PreflightResult) => setPreflight(data))
+      .catch(() => {
+        setPreflight({
+          ok: false,
+          checks: {
+            server: {
+              ok: false,
+              message: 'Could not reach /api/live-call-status. The server may not be running, or you are not authenticated.',
+            },
+          },
+        });
+      });
+  }, []);
 
   // Momentum: real rate-of-change of closeOpportunityPct over the last ~15s
   // of analysis history — never a fabricated value.
@@ -266,11 +317,24 @@ export default function LiveCallPage() {
         )}
       </div>
 
-      {/* Error banner */}
-      {error && (
-        <div className="flex items-center gap-3 px-5 py-2 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-400 shrink-0">
-          <span>⚠️</span>
-          <span>{error}</span>
+      {/* Pre-flight configuration errors — shown before call starts */}
+      {showPreflight && preflight && !preflight.ok && !isListening && (
+        <div className="shrink-0 overflow-y-auto max-h-60">
+          <PreflightPanel result={preflight} onDismiss={() => setShowPreflight(false)} />
+        </div>
+      )}
+
+      {/* Session / connection error — shown during or after call attempt */}
+      {error && connectionState !== 'idle' && (
+        <div className="shrink-0 mx-4 my-2 rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-xs space-y-1">
+          <div className="flex items-center gap-2 text-red-400 font-semibold">
+            <span>✗</span>
+            <span>Connection failed — real error (no fallback or demo mode)</span>
+          </div>
+          <p className="text-slate-400 leading-relaxed">{error}</p>
+          <p className="text-slate-600">
+            Check <a href="/api/live-call-status" target="_blank" className="text-[#D4AF37] underline">/api/live-call-status</a> for a full diagnostic, or see the browser console for details.
+          </p>
         </div>
       )}
 
