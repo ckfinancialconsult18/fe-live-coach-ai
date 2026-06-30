@@ -1,0 +1,29 @@
+{
+  "jobId": "mqznszr8_w5qtgo",
+  "originalFilename": "And your goal is to learn how to, a.txt",
+  "type": "buying_signal",
+  "targetFile": "buying_signals",
+  "section": "Strong Signals",
+  "summary": "Neighbor's funeral cost surfaced as double buying signal",
+  "content": "Prospect volunteered a neighbor death story AND the funeral cost AND stated she does not want to burden her kids — a triple buying signal sequence. Agent should close immediately after this.",
+  "evidence": "PROSPECT: \"My neighbor just passed and it cost over twelve thousand dollars. I don't want to leave that burden on my kids.\"",
+  "confidence": 96,
+  "tags": [
+    "burden",
+    "family",
+    "funeral-cost",
+    "neighbor-death",
+    "buying-signal"
+  ],
+  "markdownEntry": "---\n**Learned:** 2026-06-29 | **Source:** Job mqznszr8_w5qtgo | **Confidence:** 96%\n\n**Summary:** Loss story + burden fear = triple buying signal — close immediately.\n\n**Evidence:**\n> PROSPECT: \"My neighbor just passed and it cost over twelve thousand dollars. I don't want to leave that burden on my kids.\"\n\n**Coaching Note:** When a prospect volunteers a loss story, funeral cost, and family burden concern in one breath, stop presenting. Trial close: \"That's exactly what this plan prevents. If I could get that covered for less than you're paying now, would you want to get that in place today?\"\n\n---",
+  "isDuplicate": false,
+  "similarTo": [],
+  "conflictsWith": [],
+  "callSummary": "Demo mode — no OpenAI API key configured. This is a simulated extraction showing what the pipeline produces for a typical final expense sales call.",
+  "callType": "sales",
+  "callOutcome": "follow_up",
+  "callScore": 62,
+  "id": "mqznt267_n0toy5",
+  "status": "pending",
+  "createdAt": "2026-06-29T20:17:34.016Z"
+}

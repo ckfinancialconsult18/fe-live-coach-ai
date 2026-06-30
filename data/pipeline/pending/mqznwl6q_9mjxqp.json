@@ -1,0 +1,29 @@
+{
+  "jobId": "mqznwkvn_h949c5",
+  "originalFilename": "Little more clarity..txt",
+  "type": "medication",
+  "targetFile": "medications",
+  "section": "Diabetes Medications",
+  "summary": "Metformin (oral T2D) — Americo Eagle preferred carrier",
+  "content": "Prospect on Metformin-only management for Type 2 Diabetes. No insulin. This is the most favorable diabetic profile in the FE market.",
+  "evidence": "PROSPECT: \"I have type 2 diabetes, been managing it for about ten years with Metformin.\"",
+  "confidence": 97,
+  "tags": [
+    "metformin",
+    "diabetes",
+    "type2",
+    "americo",
+    "underwriting"
+  ],
+  "markdownEntry": "---\n**Learned:** 2026-06-29 | **Source:** Job mqznwkvn_h949c5 | **Confidence:** 97%\n\n**Summary:** Metformin-only T2D management — level benefit available, Americo Eagle preferred.\n\n**Evidence:**\n> PROSPECT: \"I have type 2 diabetes, been managing it for about ten years with Metformin.\"\n\n**Coaching Note:** When a prospect confirms oral-only diabetes management with no insulin, immediately lead with Americo Eagle. Do not over-qualify — this profile qualifies for level benefit at most carriers.\n\n---",
+  "isDuplicate": false,
+  "similarTo": [],
+  "conflictsWith": [],
+  "callSummary": "Demo mode — no OpenAI API key configured. This is a simulated extraction showing what the pipeline produces for a typical final expense sales call.",
+  "callType": "sales",
+  "callOutcome": "follow_up",
+  "callScore": 62,
+  "id": "mqznwl6q_9mjxqp",
+  "status": "pending",
+  "createdAt": "2026-06-29T20:20:18.626Z"
+}

@@ -1,0 +1,125 @@
+{
+  "totalJobs": 0,
+  "completedJobs": 0,
+  "failedJobs": 0,
+  "queuedJobs": 0,
+  "totalTranscripts": 0,
+  "salesCalls": 0,
+  "coachingCalls": 0,
+  "totalInsightsExtracted": 12,
+  "pendingReview": 12,
+  "approvedTotal": 0,
+  "rejectedTotal": 0,
+  "duplicatesSkipped": 0,
+  "byType": {
+    "medication": 3,
+    "buying_signal": 3,
+    "failed_close": 3,
+    "personality": 3
+  },
+  "byFile": {
+    "medications": 3,
+    "buying_signals": 3,
+    "losing_calls": 3,
+    "personality_profiles": 3
+  },
+  "topObjections": [],
+  "topMedications": [
+    {
+      "text": "Metformin (oral T2D) — Americo Eagle preferred carrier",
+      "count": 3
+    }
+  ],
+  "topBuyingSignals": [
+    {
+      "text": "Neighbor's funeral cost surfaced as double buying signal",
+      "count": 3
+    }
+  ],
+  "confidenceDistribution": [
+    {
+      "range": "90-100",
+      "count": 9
+    },
+    {
+      "range": "70-89",
+      "count": 3
+    },
+    {
+      "range": "50-69",
+      "count": 0
+    }
+  ],
+  "recentActivity": [
+    {
+      "date": "2026-06-16",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-17",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-18",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-19",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-20",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-21",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-22",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-23",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-24",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-25",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-26",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-27",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-28",
+      "processed": 0,
+      "approved": 0
+    },
+    {
+      "date": "2026-06-29",
+      "processed": 12,
+      "approved": 0
+    }
+  ]
+}

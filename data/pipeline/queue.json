@@ -1,0 +1,53 @@
+[
+  {
+    "id": "mqznszr8_w5qtgo",
+    "originalName": "And your goal is to learn how to, a.txt",
+    "format": "txt",
+    "status": "pending_review",
+    "progress": 100,
+    "createdAt": "2026-06-29T20:17:30.920Z",
+    "retryCount": 0,
+    "startedAt": "2026-06-29T20:17:33.624Z",
+    "wordCount": 312,
+    "extractedCount": 4,
+    "callType": "sales",
+    "callOutcome": "follow_up",
+    "callScore": 62,
+    "completedAt": "2026-06-29T20:17:34.142Z",
+    "newKnowledgeCount": 4
+  },
+  {
+    "id": "mqznwkvn_h949c5",
+    "originalName": "Little more clarity..txt",
+    "format": "txt",
+    "status": "pending_review",
+    "progress": 100,
+    "createdAt": "2026-06-29T20:20:18.233Z",
+    "retryCount": 0,
+    "startedAt": "2026-06-29T20:20:18.326Z",
+    "wordCount": 526,
+    "extractedCount": 4,
+    "callType": "sales",
+    "callOutcome": "follow_up",
+    "callScore": 62,
+    "completedAt": "2026-06-29T20:20:18.696Z",
+    "newKnowledgeCount": 4
+  },
+  {
+    "id": "mqzo56rs_cfbpvr",
+    "originalName": "conversation_only.txt",
+    "format": "txt",
+    "status": "pending_review",
+    "progress": 100,
+    "createdAt": "2026-06-29T20:26:59.874Z",
+    "retryCount": 0,
+    "startedAt": "2026-06-29T20:26:59.993Z",
+    "wordCount": 2158,
+    "extractedCount": 4,
+    "callType": "sales",
+    "callOutcome": "follow_up",
+    "callScore": 62,
+    "completedAt": "2026-06-29T20:27:00.509Z",
+    "newKnowledgeCount": 4
+  }
+]

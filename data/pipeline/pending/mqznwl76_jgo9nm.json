@@ -1,0 +1,28 @@
+{
+  "jobId": "mqznwkvn_h949c5",
+  "originalFilename": "Little more clarity..txt",
+  "type": "failed_close",
+  "targetFile": "losing_calls",
+  "section": "Stall Objection Not Recovered",
+  "summary": "Agent accepted \"think about it\" without probing — missed same-call close",
+  "content": "After a strong triple buying signal sequence, prospect stalled with \"I'd like to think about it.\" Agent did not attempt recovery. Call ended without a close or a firm callback appointment.",
+  "evidence": "PROSPECT: \"I'd like to think about that. Can I call you back?\" AGENT: [call ended]",
+  "confidence": 94,
+  "tags": [
+    "think-about-it",
+    "stall",
+    "failed-close",
+    "no-recovery"
+  ],
+  "markdownEntry": "---\n**Learned:** 2026-06-29 | **Source:** Job mqznwkvn_h949c5 | **Confidence:** 94%\n\n**Summary:** \"Think about it\" after buying signal — agent failed to probe or recover.\n\n**Evidence:**\n> PROSPECT: \"I'd like to think about that. Can I call you back?\"\n> AGENT: [accepted the stall without attempting recovery]\n\n**Coaching Note:** Never accept a raw callback from a prospect who just said they don't want to burden their kids. Use the \"What Specifically?\" probe: \"Of course — can I ask what part you'd like to think about? Is it the price, or something about how the plan works?\" Then handle the real objection.\n\n---",
+  "isDuplicate": false,
+  "similarTo": [],
+  "conflictsWith": [],
+  "callSummary": "Demo mode — no OpenAI API key configured. This is a simulated extraction showing what the pipeline produces for a typical final expense sales call.",
+  "callType": "sales",
+  "callOutcome": "follow_up",
+  "callScore": 62,
+  "id": "mqznwl76_jgo9nm",
+  "status": "pending",
+  "createdAt": "2026-06-29T20:20:18.642Z"
+}

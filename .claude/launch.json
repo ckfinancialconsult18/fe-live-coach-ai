@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fe-live-coach-ai",
+      "runtimeExecutable": "C:\\projects\\FE-Live-Coach-AI\\node.exe",
+      "runtimeArgs": ["C:\\project\\fe-live-coach-ai\\node_modules\\next\\dist\\bin\\next", "dev"],
+      "env": { "PATH": "C:\\projects\\FE-Live-Coach-AI;C:\\Windows\\system32;C:\\Windows" },
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+[
+  {
+    "id": "mqznt25k_e5anxu",
+    "jobId": "mqznszr8_w5qtgo",
+    "originalFilename": "And your goal is to learn how to, a.txt",
+    "type": "medication",
+    "targetFile": "medications",
+    "summary": "Metformin (oral T2D) — Americo Eagle preferred carrier",
+    "confidence": 97,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:17:33.992Z",
+    "tags": [
+      "metformin",
+      "diabetes",
+      "type2",
+      "americo",
+      "underwriting"
+    ]
+  },
+  {
+    "id": "mqznt267_n0toy5",
+    "jobId": "mqznszr8_w5qtgo",
+    "originalFilename": "And your goal is to learn how to, a.txt",
+    "type": "buying_signal",
+    "targetFile": "buying_signals",
+    "summary": "Neighbor's funeral cost surfaced as double buying signal",
+    "confidence": 96,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:17:34.016Z",
+    "tags": [
+      "burden",
+      "family",
+      "funeral-cost",
+      "neighbor-death",
+      "buying-signal"
+    ]
+  },
+  {
+    "id": "mqznt26x_a88akc",
+    "jobId": "mqznszr8_w5qtgo",
+    "originalFilename": "And your goal is to learn how to, a.txt",
+    "type": "failed_close",
+    "targetFile": "losing_calls",
+    "summary": "Agent accepted \"think about it\" without probing — missed same-call close",
+    "confidence": 94,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:17:34.041Z",
+    "tags": [
+      "think-about-it",
+      "stall",
+      "failed-close",
+      "no-recovery"
+    ]
+  },
+  {
+    "id": "mqznt280_1i1kru",
+    "jobId": "mqznszr8_w5qtgo",
+    "originalFilename": "And your goal is to learn how to, a.txt",
+    "type": "personality",
+    "targetFile": "personality_profiles",
+    "summary": "Protector profile — moved to price before emotional close was fully anchored",
+    "confidence": 89,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:17:34.080Z",
+    "tags": [
+      "protector",
+      "family-first",
+      "emotional-close",
+      "premature-price"
+    ]
+  },
+  {
+    "id": "mqznwl6q_9mjxqp",
+    "jobId": "mqznwkvn_h949c5",
+    "originalFilename": "Little more clarity..txt",
+    "type": "medication",
+    "targetFile": "medications",
+    "summary": "Metformin (oral T2D) — Americo Eagle preferred carrier",
+    "confidence": 97,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:20:18.626Z",
+    "tags": [
+      "metformin",
+      "diabetes",
+      "type2",
+      "americo",
+      "underwriting"
+    ]
+  },
+  {
+    "id": "mqznwl6y_ijsw3d",
+    "jobId": "mqznwkvn_h949c5",
+    "originalFilename": "Little more clarity..txt",
+    "type": "buying_signal",
+    "targetFile": "buying_signals",
+    "summary": "Neighbor's funeral cost surfaced as double buying signal",
+    "confidence": 96,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:20:18.634Z",
+    "tags": [
+      "burden",
+      "family",
+      "funeral-cost",
+      "neighbor-death",
+      "buying-signal"
+    ]
+  },
+  {
+    "id": "mqznwl76_jgo9nm",
+    "jobId": "mqznwkvn_h949c5",
+    "originalFilename": "Little more clarity..txt",
+    "type": "failed_close",
+    "targetFile": "losing_calls",
+    "summary": "Agent accepted \"think about it\" without probing — missed same-call close",
+    "confidence": 94,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:20:18.642Z",
+    "tags": [
+      "think-about-it",
+      "stall",
+      "failed-close",
+      "no-recovery"
+    ]
+  },
+  {
+    "id": "mqznwl7g_rk6h20",
+    "jobId": "mqznwkvn_h949c5",
+    "originalFilename": "Little more clarity..txt",
+    "type": "personality",
+    "targetFile": "personality_profiles",
+    "summary": "Protector profile — moved to price before emotional close was fully anchored",
+    "confidence": 89,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:20:18.652Z",
+    "tags": [
+      "protector",
+      "family-first",
+      "emotional-close",
+      "premature-price"
+    ]
+  },
+  {
+    "id": "mqzo578u_5r4aox",
+    "jobId": "mqzo56rs_cfbpvr",
+    "originalFilename": "conversation_only.txt",
+    "type": "medication",
+    "targetFile": "medications",
+    "summary": "Metformin (oral T2D) — Americo Eagle preferred carrier",
+    "confidence": 97,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:27:00.462Z",
+    "tags": [
+      "metformin",
+      "diabetes",
+      "type2",
+      "americo",
+      "underwriting"
+    ]
+  },
+  {
+    "id": "mqzo578y_bufajn",
+    "jobId": "mqzo56rs_cfbpvr",
+    "originalFilename": "conversation_only.txt",
+    "type": "buying_signal",
+    "targetFile": "buying_signals",
+    "summary": "Neighbor's funeral cost surfaced as double buying signal",
+    "confidence": 96,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:27:00.466Z",
+    "tags": [
+      "burden",
+      "family",
+      "funeral-cost",
+      "neighbor-death",
+      "buying-signal"
+    ]
+  },
+  {
+    "id": "mqzo5790_15apuv",
+    "jobId": "mqzo56rs_cfbpvr",
+    "originalFilename": "conversation_only.txt",
+    "type": "failed_close",
+    "targetFile": "losing_calls",
+    "summary": "Agent accepted \"think about it\" without probing — missed same-call close",
+    "confidence": 94,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:27:00.468Z",
+    "tags": [
+      "think-about-it",
+      "stall",
+      "failed-close",
+      "no-recovery"
+    ]
+  },
+  {
+    "id": "mqzo5794_h12jdd",
+    "jobId": "mqzo56rs_cfbpvr",
+    "originalFilename": "conversation_only.txt",
+    "type": "personality",
+    "targetFile": "personality_profiles",
+    "summary": "Protector profile — moved to price before emotional close was fully anchored",
+    "confidence": 89,
+    "status": "pending",
+    "isDuplicate": false,
+    "createdAt": "2026-06-29T20:27:00.472Z",
+    "tags": [
+      "protector",
+      "family-first",
+      "emotional-close",
+      "premature-price"
+    ]
+  }
+]
