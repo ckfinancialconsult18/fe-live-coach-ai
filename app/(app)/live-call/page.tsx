@@ -63,6 +63,7 @@ export default function LiveCallPage() {
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<PostCallReportType | null>(null);
+  const [postCallError, setPostCallError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'reminders' | 'memory'>('stage');
   const [objectionCount, setObjectionCount] = useState(0);
@@ -263,34 +264,58 @@ export default function LiveCallPage() {
   }, [mic, startListening, clearTranscript, autosave]);
 
   const endCall = useCallback(async () => {
+    // Capture callId BEFORE stopCall() — stopCall synchronously nullifies callIdRef
+    // and schedules setCallId(null), so reading autosave.callId after that is unsafe.
+    const pendingCallId = autosave.callId;
+    console.log('[endCall] pendingCallId:', pendingCallId, '| transcript lines:', transcript.length, '| duration:', duration);
+
     stopListening();
     mic.stop();
     if (timerRef.current) clearInterval(timerRef.current);
     autosave.stopCall();
 
-    if (transcript.length > 0) {
-      setLoadingReport(true);
-      setShowPostCall(true);
-      try {
-        const text = transcript.map((l) => `${l.speaker.toUpperCase()}: ${l.text}`).join('\n');
-        const res = await fetch('/api/post-call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            transcript: text,
-            transcriptLines: transcript,
-            duration,
-            metrics,
-            callId: autosave.callId,
-            timeline,
-          }),
-        });
-        if (res.ok) setPostCallReport(await res.json());
-      } catch {
-        // keep null
-      } finally {
-        setLoadingReport(false);
+    setPostCallReport(null);
+    setPostCallError(null);
+    setShowPostCall(true);
+    setLoadingReport(true);
+
+    try {
+      const text = transcript.map((l) => `${l.speaker.toUpperCase()}: ${l.text}`).join('\n');
+      const body = JSON.stringify({
+        transcript: text || ' ',
+        transcriptLines: transcript,
+        duration,
+        metrics,
+        callId: pendingCallId,
+        timeline,
+      });
+      console.log('[endCall] POST /api/post-call, callId:', pendingCallId, 'body size:', body.length);
+
+      const res = await fetch('/api/post-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      const data = await res.json().catch(() => null);
+      console.log('[endCall] /api/post-call response:', res.status, data);
+
+      if (!res.ok) {
+        setPostCallError(data?.error ?? `Server error ${res.status}`);
+      } else if (data?._scoreError) {
+        // Call was saved but AI scoring failed — show the report view with the error
+        setPostCallError(data._scoreError);
+        if (data.callId) setPostCallReport({ ...data, overallScore: 0 } as PostCallReportType);
+      } else if (data?._persistError) {
+        setPostCallError(data._persistError);
+      } else {
+        setPostCallReport(data as PostCallReportType);
       }
+    } catch (err) {
+      console.error('[endCall] fetch /api/post-call threw:', err);
+      setPostCallError(`Network error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingReport(false);
     }
   }, [stopListening, mic, transcript, duration, metrics, autosave, timeline]);
 
@@ -302,7 +327,7 @@ export default function LiveCallPage() {
   const listenPct = 100 - talkPct;
 
   if (showPostCall) {
-    return <PostCallReportView report={postCallReport} transcript={transcript} loading={loadingReport} onClose={() => setShowPostCall(false)} />;
+    return <PostCallReportView report={postCallReport} transcript={transcript} loading={loadingReport} error={postCallError} onClose={() => setShowPostCall(false)} />;
   }
 
   return (
@@ -428,10 +453,11 @@ export default function LiveCallPage() {
 
 // ── Post-Call Report ──────────────────────────────────────────────────────────
 
-function PostCallReportView({ report, transcript, loading, onClose }: {
+function PostCallReportView({ report, transcript, loading, error, onClose }: {
   report: PostCallReportType | null;
   transcript: { id: string; speaker: string; text: string }[];
   loading: boolean;
+  error: string | null;
   onClose: () => void;
 }) {
   const [view, setView] = useState<'report' | 'timeline' | 'transcript'>('report');
@@ -448,10 +474,21 @@ function PostCallReportView({ report, transcript, loading, onClose }: {
 
   if (!report) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <p className="text-slate-400">No report available.</p>
+      <div className="flex flex-col items-center justify-center h-full gap-4 px-8 text-center">
+        <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+          <svg className="w-6 h-6 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+        </div>
+        <div className="space-y-2">
+          <p className="text-slate-300 font-semibold">Report generation failed</p>
+          {error && (
+            <p className="text-sm text-slate-500 max-w-lg leading-relaxed">{error}</p>
+          )}
+          <p className="text-xs text-slate-600">Your call has been saved. Check Past Calls to view it.</p>
+        </div>
         <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/8 text-slate-300 text-sm hover:bg-white/12 transition-colors">
-          Back to Call
+          ← Back to Call
         </button>
       </div>
     );
@@ -469,6 +506,11 @@ function PostCallReportView({ report, transcript, loading, onClose }: {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {error && (
+        <div className="shrink-0 mx-6 mt-4 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/8 text-xs text-amber-300 leading-relaxed">
+          <span className="font-semibold">Note: </span>{error}
+        </div>
+      )}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/6 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-100">Post-Call Report</h2>
