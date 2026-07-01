@@ -9,21 +9,32 @@ import { requireUser, logAudit } from '@/lib/api/guard';
  */
 export async function POST() {
   const { supabase, user, response } = await requireUser();
-  if (!user) return response;
+  if (!user) {
+    console.error('[calls/start] auth failed — no user');
+    return response;
+  }
+
+  console.log('[calls/start] INSERT attempt — userId:', user.id);
+
+  const insertPayload = {
+    user_id: user.id,
+    call_type: 'sales',
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+  };
 
   const { data, error } = await supabase
     .from('calls')
-    .insert({
-      user_id: user.id,
-      call_type: 'sales',
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-    } as never)
+    .insert(insertPayload as never)
     .select('id')
     .single();
 
-  if (error || !data) return NextResponse.json({ error: error?.message ?? 'Failed to start call' }, { status: 500 });
+  if (error || !data) {
+    console.error('[calls/start] INSERT failed — code:', error?.code, '| msg:', error?.message, '| details:', error?.details, '| hint:', error?.hint);
+    return NextResponse.json({ error: error?.message ?? 'Failed to start call' }, { status: 500 });
+  }
 
+  console.log('[calls/start] INSERT succeeded — callId:', data.id, '| userId:', user.id);
   await logAudit(supabase, { userId: user.id, action: 'call.start', entityType: 'call', entityId: data.id });
   return NextResponse.json({ callId: data.id });
 }

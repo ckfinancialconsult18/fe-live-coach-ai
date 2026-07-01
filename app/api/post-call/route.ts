@@ -35,6 +35,7 @@ async function finalizeCall(
   const now = new Date();
   const duration = body.duration ?? 0;
   const startedAt = new Date(now.getTime() - duration * 1000).toISOString();
+  const lineCount = body.transcriptLines?.length ?? 0;
 
   const callPayload = {
     call_type: 'sales',
@@ -47,31 +48,48 @@ async function finalizeCall(
   };
 
   const incomingCallId = body.callId ?? null;
-  console.log('[post-call] finalizeCall → received callId:', incomingCallId, '| userId:', userId, '| lines:', body.transcriptLines?.length ?? 0);
 
+  console.log('[post-call][1] finalizeCall — callId:', incomingCallId,
+    '| userId:', userId,
+    '| transcriptLines:', lineCount,
+    '| transcriptChars:', body.transcript?.length ?? 0,
+    '| duration:', duration + 's',
+    '| callId_is_null:', incomingCallId === null);
+
+  // ── Try UPDATE on the existing in-progress row ──────────────────────────────
   if (incomingCallId) {
+    console.log('[post-call][2] UPDATE calls — id:', incomingCallId, '| status→completed | transcript lines:', lineCount);
+
     const { data, error } = await supabase
       .from('calls')
       .update(callPayload as never)
       .eq('id', incomingCallId)
       .eq('user_id', userId)
-      .select('id')
+      .select('id, status, transcript')
       .single();
 
     if (error) {
-      console.error('[post-call] UPDATE calls failed — code:', error.code, '| msg:', error.message, '| hint:', error.hint, '| details:', error.details);
+      console.error('[post-call][2] UPDATE failed — code:', error.code,
+        '| msg:', error.message,
+        '| hint:', error.hint,
+        '| details:', error.details,
+        '| PGRST116=no_rows_found');
     } else if (data?.id) {
-      console.log('[post-call] UPDATE succeeded → callId:', data.id);
+      const savedLines = Array.isArray(data.transcript) ? (data.transcript as unknown[]).length : '?';
+      console.log('[post-call][2] UPDATE succeeded — callId:', data.id,
+        '| status in DB:', data.status,
+        '| transcript lines now in DB:', savedLines);
       return data.id;
     } else {
-      console.warn('[post-call] UPDATE returned no data (0 rows matched id+user_id). callId:', incomingCallId, 'userId:', userId);
+      console.warn('[post-call][2] UPDATE matched 0 rows — callId:', incomingCallId,
+        ', userId:', userId, ' — row missing or user_id mismatch');
     }
   }
 
-  // Fallback: insert a fresh completed row. This happens when:
-  // - callId was null (start-call failed or user refreshed mid-call)
-  // - UPDATE matched 0 rows (id/user mismatch, row already deleted)
-  console.log('[post-call] INSERT fallback → creating new completed calls row');
+  // ── INSERT fallback ──────────────────────────────────────────────────────────
+  console.log('[post-call][3] INSERT fallback — transcriptLines:', lineCount,
+    '| reason:', incomingCallId ? 'UPDATE matched 0 rows' : 'callId was null');
+
   const { data: inserted, error: insertError } = await supabase
     .from('calls')
     .insert({ user_id: userId, started_at: startedAt, ...callPayload } as never)
@@ -79,11 +97,13 @@ async function finalizeCall(
     .single();
 
   if (insertError || !inserted) {
-    console.error('[post-call] INSERT also failed — code:', insertError?.code, '| msg:', insertError?.message, '| details:', insertError?.details);
+    console.error('[post-call][3] INSERT also failed — code:', insertError?.code,
+      '| msg:', insertError?.message,
+      '| details:', insertError?.details);
     return null;
   }
 
-  console.log('[post-call] INSERT succeeded → new callId:', inserted.id);
+  console.log('[post-call][3] INSERT succeeded — new callId:', inserted.id, '| transcriptLines:', lineCount);
   return inserted.id;
 }
 
@@ -98,7 +118,7 @@ async function persistScore(
   report: any,
   body: PostCallRequestBody,
 ): Promise<void> {
-  const { error } = await supabase.from('call_scores').upsert({
+  const upsertPayload = {
     user_id: userId,
     call_id: callId,
     overall_score: report.overallScore ?? 0,
@@ -131,12 +151,27 @@ async function persistScore(
     follow_up_email: report.followUpEmail ?? '',
     crm_notes: report.crmNotes ?? '',
     improvement_plan: report.improvementPlan ?? [],
-  } as never, { onConflict: 'call_id' });
+  };
+
+  console.log('[post-call][5] call_scores UPSERT — callId:', callId,
+    '| overall_score:', upsertPayload.overall_score,
+    '| strengths:', upsertPayload.strengths.length,
+    '| objections:', upsertPayload.objections.length,
+    '| buying_signals:', upsertPayload.buying_signals.length,
+    '| improvement_plan items:', Array.isArray(upsertPayload.improvement_plan) ? upsertPayload.improvement_plan.length : typeof upsertPayload.improvement_plan);
+
+  const { error } = await supabase
+    .from('call_scores')
+    .upsert(upsertPayload as never, { onConflict: 'call_id' });
 
   if (error) {
-    console.error('[post-call] call_scores upsert failed — code:', error.code, '| msg:', error.message, '| details:', error.details);
+    console.error('[post-call][5] call_scores UPSERT failed — code:', error.code,
+      '| msg:', error.message,
+      '| details:', error.details,
+      '| hint:', error.hint);
   } else {
-    console.log('[post-call] call_scores upserted for callId:', callId, '| score:', report.overallScore);
+    console.log('[post-call][5] call_scores UPSERT succeeded — callId:', callId,
+      '| score:', upsertPayload.overall_score);
   }
 }
 
@@ -144,26 +179,41 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (!user) {
-    console.error('[post-call] auth failed:', authError?.message);
+    console.error('[post-call][0] auth failed:', authError?.message);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const body = await req.json() as PostCallRequestBody;
-  if (!body.transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
+
+  console.log('[post-call][0] POST received — userId:', user.id,
+    '| callId:', body.callId ?? 'null',
+    '| transcriptLines:', body.transcriptLines?.length ?? 0,
+    '| transcriptChars:', body.transcript?.length ?? 0,
+    '| duration:', body.duration ?? 0,
+    '| timeline events:', body.timeline?.length ?? 0);
+
+  if (!body.transcript) {
+    console.error('[post-call][0] rejected — no transcript field in body');
+    return NextResponse.json({ error: 'No transcript' }, { status: 400 });
+  }
 
   const realMetrics = body.transcriptLines?.length
     ? computeRealMetrics(body.transcriptLines)
     : { talkPct: 0, listenPct: 0, questionsAskedCount: 0 };
 
+  console.log('[post-call][0] computed metrics — talkPct:', realMetrics.talkPct,
+    '| listenPct:', realMetrics.listenPct,
+    '| questions:', realMetrics.questionsAskedCount);
+
   // ── Step 1: Finalize the call row immediately ─────────────────────────────
-  // This MUST happen before any AI call so the call is never lost if OpenAI
-  // fails, times out, or the API key is missing.
   const persistedCallId = await finalizeCall(supabase, user.id, body);
 
-  // ── Step 2: AI scoring (optional — if it fails, the call is still saved) ──
+  console.log('[post-call][4] finalizeCall result — persistedCallId:', persistedCallId ?? 'NULL (DB write failed)');
+
+  // ── Step 2: AI scoring ────────────────────────────────────────────────────
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.warn('[post-call] OPENAI_API_KEY not set — call saved without AI score');
+    console.warn('[post-call][4] OPENAI_API_KEY not set — call saved without AI score');
     return NextResponse.json({
       callId: persistedCallId,
       _persistError: null,
@@ -171,10 +221,14 @@ export async function POST(req: NextRequest) {
     }, { status: 200 });
   }
 
+  const model = process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1';
+  console.log('[post-call][4] OpenAI request — model:', model,
+    '| transcriptChars:', body.transcript.length);
+
   let report: any;
   try {
     const res = await openai.chat.completions.create({
-      model: process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1',
+      model,
       messages: [
         { role: 'system', content: POST_CALL_PROMPT },
         {
@@ -187,19 +241,24 @@ export async function POST(req: NextRequest) {
     });
 
     const content = res.choices[0]?.message?.content ?? '{}';
-    console.log('[post-call] OpenAI completed, content length:', content.length);
+    console.log('[post-call][4] OpenAI succeeded — content length:', content.length,
+      '| finish_reason:', res.choices[0]?.finish_reason);
     report = JSON.parse(content);
+    console.log('[post-call][4] report parsed — overallScore:', report.overallScore,
+      '| summary length:', report.summary?.length ?? 0,
+      '| strengths:', report.strengths?.length ?? 0,
+      '| objections:', report.objections?.length ?? 0,
+      '| buyingSignals:', report.buyingSignals?.length ?? 0,
+      '| improvementPlan:', Array.isArray(report.improvementPlan) ? report.improvementPlan.length : typeof report.improvementPlan);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[post-call] OpenAI failed:', msg);
-    // Call IS saved. Return 200 with error detail so the UI can display it.
+    console.error('[post-call][4] OpenAI failed — error:', msg);
     return NextResponse.json({
       callId: persistedCallId,
       _scoreError: `AI report generation failed: ${msg}. Your call has been saved to Past Calls.`,
     }, { status: 200 });
   }
 
-  // Real metrics always win over whatever the model echoed back.
   report.talkPct = realMetrics.talkPct;
   report.listenPct = realMetrics.listenPct;
   report.questionsAskedCount = realMetrics.questionsAskedCount;
@@ -208,8 +267,13 @@ export async function POST(req: NextRequest) {
     await persistScore(supabase, user.id, persistedCallId, report, body);
     report.callId = persistedCallId;
   } else {
+    console.error('[post-call][5] skipping persistScore — no persisted callId');
     report._persistError = 'Call data could not be saved to the database. Check server logs for details.';
   }
+
+  console.log('[post-call][6] response sent — callId:', report.callId ?? 'none',
+    '| _persistError:', report._persistError ?? 'none',
+    '| _scoreError:', report._scoreError ?? 'none');
 
   return NextResponse.json(report);
 }

@@ -15,17 +15,35 @@ export default async function ReportsPage() {
   const rangeStart = new Date(today);
   rangeStart.setDate(rangeStart.getDate() - 6); // last 7 days inclusive
 
-  const [{ data: calls }, { data: scores }] = await Promise.all([
+  const [{ data: calls, error: callsErr }, { data: scores, error: scoresErr }] = await Promise.all([
     supabase
       .from('calls')
-      .select('id, started_at, outcome')
+      .select('id, started_at, outcome, status, transcript')
       .gte('started_at', rangeStart.toISOString())
       .order('started_at'),
     supabase
       .from('call_scores')
-      .select('overall_score, created_at, call_id')
+      .select('overall_score, created_at, call_id, summary')
       .gte('created_at', rangeStart.toISOString()),
   ]);
+
+  const { data: { user } } = await supabase.auth.getUser();
+  console.log('[reports] userId:', user?.id ?? 'unauthenticated',
+    '| rangeStart:', rangeStart.toISOString(),
+    '| calls query error:', callsErr?.message ?? 'none',
+    '| scores query error:', scoresErr?.message ?? 'none',
+    '| calls rows:', calls?.length ?? 0,
+    '| scores rows:', scores?.length ?? 0);
+
+  if (calls && calls.length > 0) {
+    console.log('[reports] call statuses:', JSON.stringify([...new Set(calls.map((c: any) => c.status))]));
+    const withTranscript = calls.filter((c: any) => Array.isArray(c.transcript) && c.transcript.length > 0);
+    console.log('[reports] calls with non-empty transcript:', withTranscript.length, '/', calls.length);
+  }
+  if (scores && scores.length > 0) {
+    console.log('[reports] score range: min', Math.min(...scores.map((s: any) => s.overall_score)),
+      'max', Math.max(...scores.map((s: any) => s.overall_score)));
+  }
 
   const scoreByCallId = new Map((scores ?? []).map((s) => [s.call_id, s.overall_score]));
 
