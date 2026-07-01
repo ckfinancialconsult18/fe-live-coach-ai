@@ -16,11 +16,7 @@ const tabs: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'billing',       label: 'Billing',         icon: '💳' },
 ];
 
-const mockUsers = [
-  { id: 'u1', name: 'Courtney Kegresse', email: 'ckfinancialconsult@gmail.com', role: 'admin',  status: 'active' },
-  { id: 'u2', name: 'Mike Johnson',      email: 'mike@ckfinancial.com',         role: 'agent',  status: 'active' },
-  { id: 'u3', name: 'Sarah Davis',       email: 'sarah@ckfinancial.com',        role: 'viewer', status: 'inactive' },
-];
+const mockUsers: { id: string; name: string; email: string; role: string; status: string }[] = [];
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
@@ -57,20 +53,20 @@ export default function SettingsPage() {
           <h2 className="text-lg font-semibold text-slate-100">Profile Settings</h2>
           <div className="flex items-center gap-5">
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-2xl font-bold text-white shrink-0">
-              CK
+              ?
             </div>
             <div>
-              <p className="font-semibold text-slate-200">Courtney Kegresse</p>
-              <p className="text-sm text-slate-500">ckfinancialconsult@gmail.com</p>
+              <p className="font-semibold text-slate-200">Your Profile</p>
+              <p className="text-sm text-slate-500">Update your information below</p>
               <button className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors">Change photo</button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Input label="First Name" defaultValue="Courtney" />
-            <Input label="Last Name" defaultValue="Kegresse" />
-            <Input label="Email" type="email" defaultValue="ckfinancialconsult@gmail.com" />
-            <Input label="Phone" defaultValue="(555) 123-4567" />
-            <Input label="License Number" defaultValue="TX-LIC-2024-88821" />
+            <Input label="First Name" defaultValue="" placeholder="First name" />
+            <Input label="Last Name" defaultValue="" placeholder="Last name" />
+            <Input label="Email" type="email" defaultValue="" placeholder="you@agency.com" />
+            <Input label="Phone" defaultValue="" placeholder="(555) 000-0000" />
+            <Input label="License Number" defaultValue="" placeholder="State license number" />
             <Select label="Default State">
               <option>Texas</option>
               <option>Florida</option>
@@ -92,14 +88,14 @@ export default function SettingsPage() {
         <div className="glass-card rounded-2xl p-6 space-y-6">
           <h2 className="text-lg font-semibold text-slate-100">Agency Settings</h2>
           <div className="grid grid-cols-2 gap-4">
-            <Input label="Agency Name" defaultValue="CK Financial" className="col-span-2" />
-            <Input label="Agency Phone" defaultValue="(555) 987-6543" />
-            <Input label="Agency Email" defaultValue="info@ckfinancial.com" />
-            <Input label="Website" defaultValue="ckfinancial.com" />
-            <Input label="Tax ID / EIN" defaultValue="XX-XXXXXXX" />
-            <Input label="Address" defaultValue="1234 Insurance Blvd, Suite 100" className="col-span-2" />
-            <Input label="City" defaultValue="Dallas" />
-            <Input label="State" defaultValue="TX" />
+            <Input label="Agency Name" defaultValue="" placeholder="Agency name" className="col-span-2" />
+            <Input label="Agency Phone" defaultValue="" placeholder="(555) 000-0000" />
+            <Input label="Agency Email" defaultValue="" placeholder="info@agency.com" />
+            <Input label="Website" defaultValue="" placeholder="agency.com" />
+            <Input label="Tax ID / EIN" defaultValue="" placeholder="XX-XXXXXXX" />
+            <Input label="Address" defaultValue="" placeholder="Street address" className="col-span-2" />
+            <Input label="City" defaultValue="" placeholder="City" />
+            <Input label="State" defaultValue="" placeholder="State" />
           </div>
           <div className="flex justify-end gap-3">
             {saved && <p className="text-sm text-green-400 self-center">✅ Changes saved!</p>}

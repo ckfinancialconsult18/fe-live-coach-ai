@@ -56,7 +56,7 @@ async function buildKnowledgeIndex(supabase: SupabaseClient<Database>, userId: s
 
 async function extractSingle(text: string, jobId: string, knowledgeIndex: string, today: string): Promise<ExtractionResult> {
   if (!process.env.OPENAI_API_KEY) {
-    return buildDemoResult(jobId, today);
+    throw new Error('OPENAI_API_KEY is not configured. Knowledge extraction requires an OpenAI API key.');
   }
 
   const openai = getOpenAI();
@@ -111,25 +111,3 @@ function mergeResults(results: ExtractionResult[], jobId: string): ExtractionRes
   };
 }
 
-function buildDemoResult(jobId: string, today: string): ExtractionResult {
-  return {
-    jobId,
-    callSummary: 'Demo mode — no OpenAI API key configured. Add OPENAI_API_KEY to enable real extraction.',
-    callType: 'sales',
-    callOutcome: 'follow_up',
-    callScore: 62,
-    insights: [
-      {
-        type: 'buying_signal',
-        targetFile: 'buying_signals',
-        section: 'Demo Signal',
-        summary: 'Demo insight — configure OPENAI_API_KEY for real extraction',
-        content: 'This is placeholder content shown only when no OpenAI API key is configured.',
-        evidence: `(demo, job ${jobId})`,
-        confidence: 60,
-        tags: ['demo'],
-        markdownEntry: `Demo entry generated ${today} for job ${jobId}.`,
-      },
-    ],
-  };
-}
