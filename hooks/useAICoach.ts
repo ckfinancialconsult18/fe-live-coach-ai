@@ -68,8 +68,8 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
 
-  const lastAnalyzedIdx = useRef(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const memoryRef = useRef(memory);
   useEffect(() => {
     memoryRef.current = memory;
@@ -135,12 +135,17 @@ export function useAICoach(transcript: TranscriptLine[]) {
 
   const analyze = useCallback(async (lines: TranscriptLine[]) => {
     if (lines.length === 0) return;
-    if (lines.length === lastAnalyzedIdx.current) return;
-    lastAnalyzedIdx.current = lines.length;
+
+    // Cancel any in-flight coaching request immediately — don't wait for it
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     setIsAnalyzing(true);
     try {
-      const recentLines = lines.slice(-12);
+      // Send only the 8 most-recent lines — enough context, minimal tokens.
+      // The rest is captured in knownMemory so the model never loses facts.
+      const recentLines = lines.slice(-8);
       const transcriptText = recentLines
         .map((l) => `${l.speaker === 'agent' ? 'AGENT' : 'PROSPECT'}: ${l.text}`)
         .join('\n');
@@ -149,17 +154,13 @@ export function useAICoach(transcript: TranscriptLine[]) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length, memory: memoryRef.current }),
+        signal: ctrl.signal,
       });
 
-      if (!res.ok || !res.body) return;
+      if (!res.ok || !res.body || ctrl.signal.aborted) return;
 
-      // Real streaming consumption: read newline-delimited JSON frames as
-      // they arrive over the network (see app/api/coach/route.ts). We
-      // accumulate "delta" frames into the insight's raw JSON text and parse
-      // once it's complete (right before/at the "meta" frame) — deliberately
-      // not attempting field-by-field partial JSON parsing, which is fragile
-      // for a strict multi-field schema; the real latency win here is
-      // time-to-first-byte + total time, not a fake progressive reveal.
+      // Consume the newline-delimited JSON stream: delta frames accumulate into
+      // the full insight JSON, meta frame carries stage/underwriting/checklist.
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -167,7 +168,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || ctrl.signal.aborted) break;
         buffer += decoder.decode(value, { stream: true });
 
         let newlineIdx: number;
@@ -175,37 +176,34 @@ export function useAICoach(transcript: TranscriptLine[]) {
           const line = buffer.slice(0, newlineIdx);
           buffer = buffer.slice(newlineIdx + 1);
           if (!line.trim()) continue;
-
           try {
             const frame = JSON.parse(line);
             if (frame.t === 'delta') {
               insightText += frame.d;
             } else if (frame.t === 'meta') {
-              try { applyInsight(JSON.parse(insightText)); } catch { /* malformed — skip this turn */ }
+              try { applyInsight(JSON.parse(insightText)); } catch { /* malformed — keep previous */ }
               applyMeta(frame);
             } else if (frame.t === 'full') {
               applyInsight(frame.insight);
               applyMeta({ stage: frame.stage, underwriting: frame.underwriting, checklist: frame.checklist });
             }
-          } catch {
-            // ignore malformed frame line
-          }
+          } catch { /* ignore malformed frame */ }
         }
       }
-    } catch {
-      // network error — keep current insight
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return; // expected — new request took over
+      // other network errors — keep current insight panel state
     } finally {
-      setIsAnalyzing(false);
+      if (!ctrl.signal.aborted) setIsAnalyzing(false);
     }
   }, [applyInsight, applyMeta]);
 
-  // Debounce analysis — run shortly after a new transcript line arrives.
-  // Kept short (not zero) so rapid back-to-back utterances coalesce into one
-  // analysis call instead of firing one per word; the dominant latency cost
-  // is the model call itself, not this debounce window.
+  // 200 ms debounce: coalesces rapid back-to-back Deepgram utterances before
+  // hitting the coaching API. The abort in analyze() ensures any request still
+  // running when the next one fires is cancelled immediately, not queued.
   const scheduleAnalysis = useCallback((lines: TranscriptLine[]) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => analyze(lines), 400);
+    debounceRef.current = setTimeout(() => analyze(lines), 200);
   }, [analyze]);
 
   return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory };

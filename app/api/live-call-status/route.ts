@@ -59,62 +59,46 @@ export async function GET() {
     };
   }
 
-  // 4. OpenAI Realtime — try each model in priority order.
-  //    A 404 means that model is unavailable on this account; try the next one.
-  //    If all fail, the app automatically falls back to Web Speech API — NOT an error.
-  const REALTIME_MODELS = [
-    process.env.OPENAI_REALTIME_MODEL,
-    'gpt-4o-realtime-preview',
-    'gpt-4o-mini-realtime-preview',
-    'gpt-4o-realtime-preview-2024-10-01',
-  ].filter(Boolean) as string[];
+  // 4. Deepgram — Nova-3 speech-to-text. Not a hard failure: if unconfigured,
+  //    transcription falls back to the browser's Web Speech API automatically.
+  const deepgramKey = process.env.DEEPGRAM_API_KEY;
+  const deepgramProjectId = process.env.DEEPGRAM_PROJECT_ID;
 
-  if (apiKey) {
-    let realtimeOk = false;
-    let realtimeModel = '';
-    const realtimeTried: string[] = [];
-
-    for (const model of REALTIME_MODELS) {
-      try {
-        const res = await fetch('https://api.openai.com/v1/realtime/sessions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, modalities: ['audio', 'text'], instructions: 'Status check' }),
-        });
-        realtimeTried.push(`${model} → HTTP ${res.status}`);
-        if (res.ok) { realtimeOk = true; realtimeModel = model; break; }
-        // 401/429 are account-level failures — no point trying more models.
-        if (res.status === 401 || res.status === 429) break;
-      } catch (err) {
-        realtimeTried.push(`${model} → network error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    if (realtimeOk) {
-      checks.openai_realtime = {
-        ok: true,
-        message: `OpenAI Realtime API working — using model: ${realtimeModel}`,
-      };
-    } else {
-      // Not a hard failure — the app automatically uses Web Speech API as fallback.
-      checks.openai_realtime = {
-        ok: false,
-        message:
-          `No Realtime model available on this account (tried: ${realtimeTried.join('; ')}). ` +
-          'Live transcription will automatically use the browser Web Speech API instead. ' +
-          'To use OpenAI Realtime, set OPENAI_REALTIME_MODEL to a model your account can access, ' +
-          'or upgrade your OpenAI plan at platform.openai.com.',
-      };
-    }
-  } else {
-    checks.openai_realtime = {
+  if (!deepgramKey || !deepgramProjectId) {
+    checks.deepgram = {
       ok: false,
-      message: 'Skipped — OPENAI_API_KEY not configured.',
+      message:
+        (!deepgramKey ? 'DEEPGRAM_API_KEY is not set. ' : 'DEEPGRAM_PROJECT_ID is not set. ') +
+        'Create a free account at console.deepgram.com. ' +
+        'Transcription will fall back to the browser Web Speech API (Chrome/Edge only) until this is configured.',
     };
+  } else {
+    try {
+      const res = await fetch(`https://api.deepgram.com/v1/projects/${deepgramProjectId}/keys`, {
+        method: 'POST',
+        headers: { Authorization: `Token ${deepgramKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: 'status-check', scopes: ['usage:write'], time_to_live_in_seconds: 10 }),
+      });
+      if (res.ok) {
+        checks.deepgram = { ok: true, message: 'Deepgram Nova-3 is reachable and the API key is valid.' };
+      } else {
+        const text = await res.text().catch(() => '');
+        checks.deepgram = {
+          ok: false,
+          message: `Deepgram key validation failed (HTTP ${res.status}): ${text.slice(0, 200)}. ` +
+            'Verify DEEPGRAM_API_KEY and DEEPGRAM_PROJECT_ID at console.deepgram.com.',
+        };
+      }
+    } catch (err) {
+      checks.deepgram = {
+        ok: false,
+        message: `Could not reach Deepgram: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
-  // "ok" means everything needed for SOME form of live transcription is working.
-  // Realtime being unavailable is NOT a blocker when Web Speech API fallback is active.
+  // Hard failures block live call entirely. Deepgram being unavailable is NOT a
+  // hard failure — Web Speech API fallback handles it automatically.
   const hardFailures = ['openai_api_key', 'supabase_url', 'supabase_auth'];
   const allOk = hardFailures.every((k) => checks[k]?.ok);
   return NextResponse.json({ ok: allOk, checks }, { status: allOk ? 200 : 422 });

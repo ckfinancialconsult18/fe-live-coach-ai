@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
   let report: any;
   try {
     const res = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1',
       messages: [
         { role: 'system', content: POST_CALL_PROMPT },
         {

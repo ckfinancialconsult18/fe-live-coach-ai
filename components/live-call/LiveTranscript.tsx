@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { TranscriptLine } from '@/lib/types';
-import type { PartialTranscript } from '@/hooks/useRealtimeTranscription';
+import type { PartialTranscript } from '@/hooks/useDeepgramTranscription';
 
 interface Props {
   lines: TranscriptLine[];

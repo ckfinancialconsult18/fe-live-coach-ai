@@ -1,7 +1,7 @@
 'use client';
 
 import type { UseMicrophoneReturn } from '@/hooks/useMicrophone';
-import type { ConnectionState, TranscriptionMode } from '@/hooks/useRealtimeTranscription';
+import type { ConnectionState, TranscriptionMode } from '@/hooks/useDeepgramTranscription';
 
 interface Props {
   mic: UseMicrophoneReturn;
@@ -89,17 +89,17 @@ export function MicrophoneControls({ mic, connectionState, transcriptionMode }: 
         <span
           className="text-[9px] font-bold px-2 py-0.5 rounded-full border"
           style={
-            transcriptionMode === 'realtime'
+            transcriptionMode === 'deepgram'
               ? { background: 'rgba(34,197,94,0.1)', color: '#22c55e', borderColor: 'rgba(34,197,94,0.25)' }
               : { background: 'rgba(212,175,55,0.1)', color: '#D4AF37', borderColor: 'rgba(212,175,55,0.25)' }
           }
           title={
-            transcriptionMode === 'realtime'
-              ? 'Using OpenAI Realtime API for transcription'
-              : 'OpenAI Realtime unavailable — using browser Web Speech API (Chrome/Edge built-in)'
+            transcriptionMode === 'deepgram'
+              ? 'Deepgram Nova-3 — streaming speech-to-text with speaker diarization'
+              : 'Deepgram unavailable — using browser Web Speech API (Chrome/Edge built-in)'
           }
         >
-          {transcriptionMode === 'realtime' ? 'OpenAI Realtime' : 'Web Speech API'}
+          {transcriptionMode === 'deepgram' ? 'Deepgram Nova-3' : 'Web Speech API'}
         </span>
       )}
     </div>

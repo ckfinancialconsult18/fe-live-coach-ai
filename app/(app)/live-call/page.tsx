@@ -14,7 +14,7 @@ import { MidCallMemoryPanel } from '@/components/live-call/MidCallMemoryPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
 import { useMicrophone } from '@/hooks/useMicrophone';
-import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription';
+import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
 import type { CallMetrics, TimelineEvent, TimelineEventCategory, PostCallReport as PostCallReportType } from '@/lib/types';
@@ -57,7 +57,7 @@ export default function LiveCallPage() {
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
-  } = useRealtimeTranscription(mic);
+  } = useDeepgramTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);

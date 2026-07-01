@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
       try {
         // Underwriting + stage run concurrently with the streamed coach call —
         // by the time the coach stream finishes, these are almost always done.
+        // Underwriting + stage run concurrently with the main coach stream.
+        // gpt-4o-mini is fast enough for these structured extraction tasks.
         const sidePromise = Promise.all([
           openai.chat.completions.create({
             model: 'gpt-4o-mini',
@@ -80,8 +82,13 @@ export async function POST(req: NextRequest) {
           }),
         ]);
 
+        // GPT-4.1 for the main coaching response — faster and more accurate
+        // than gpt-4o for structured JSON reasoning. Falls back to gpt-4o if
+        // the env override points to a different model.
+        const coachModel = process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1';
+
         const coachStream = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: coachModel,
           messages: [
             { role: 'system', content: COACH_SYSTEM_PROMPT },
             ...(ragContext
