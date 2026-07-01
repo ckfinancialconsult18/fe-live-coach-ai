@@ -264,55 +264,79 @@ export default function LiveCallPage() {
   }, [mic, startListening, clearTranscript, autosave]);
 
   const endCall = useCallback(async () => {
-    // Capture callId BEFORE stopCall() — stopCall synchronously nullifies callIdRef
-    // and schedules setCallId(null), so reading autosave.callId after that is unsafe.
+    console.log('[endCall] button clicked');
+
+    // ── 1. Capture callId before any cleanup nullifies it ─────────────────────
     const pendingCallId = autosave.callId;
-    console.log('[endCall] pendingCallId:', pendingCallId, '| transcript lines:', transcript.length, '| duration:', duration);
+    // Snapshot transcript/duration now — cleanup steps may trigger re-renders
+    const transcriptSnapshot = transcript;
+    const durationSnapshot = duration;
+    const metricsSnapshot = metrics;
+    const timelineSnapshot = timeline;
 
-    stopListening();
-    mic.stop();
-    if (timerRef.current) clearInterval(timerRef.current);
-    autosave.stopCall();
+    console.log('[endCall] pendingCallId =', pendingCallId,
+      '| transcriptLines =', transcriptSnapshot.length,
+      '| duration =', durationSnapshot);
 
+    // ── 2. Cleanup — each step is guarded so a throw never aborts the fetch ──
+    // stopListening, mic.stop, autosave.stopCall are all synchronous cleanups.
+    // Any of them can throw (e.g. speechRecognition.abort() in some browsers).
+    // We catch individually so the fetch below always executes.
+    try { stopListening(); console.log('[endCall] stopListening OK'); }
+    catch (e) { console.error('[endCall] stopListening threw:', e); }
+
+    try { mic.stop(); console.log('[endCall] mic.stop OK'); }
+    catch (e) { console.error('[endCall] mic.stop threw:', e); }
+
+    try { if (timerRef.current) clearInterval(timerRef.current); }
+    catch (e) { console.error('[endCall] clearInterval threw:', e); }
+
+    try { autosave.stopCall(); console.log('[endCall] autosave.stopCall OK'); }
+    catch (e) { console.error('[endCall] autosave.stopCall threw:', e); }
+
+    // ── 3. Show loading state ──────────────────────────────────────────────────
     setPostCallReport(null);
     setPostCallError(null);
     setShowPostCall(true);
     setLoadingReport(true);
 
+    console.log('[endCall] sending POST /api/post-call — callId:', pendingCallId);
+
+    // ── 4. Finalize: always runs regardless of what cleanup did ───────────────
     try {
-      const text = transcript.map((l) => `${l.speaker.toUpperCase()}: ${l.text}`).join('\n');
-      const body = JSON.stringify({
+      const text = transcriptSnapshot.map((l) => `${l.speaker.toUpperCase()}: ${l.text}`).join('\n');
+      const bodyPayload = {
         transcript: text || ' ',
-        transcriptLines: transcript,
-        duration,
-        metrics,
+        transcriptLines: transcriptSnapshot,
+        duration: durationSnapshot,
+        metrics: metricsSnapshot,
         callId: pendingCallId,
-        timeline,
-      });
-      console.log('[endCall] POST /api/post-call, callId:', pendingCallId, 'body size:', body.length);
+        timeline: timelineSnapshot,
+      };
 
       const res = await fetch('/api/post-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body,
+        body: JSON.stringify(bodyPayload),
       });
 
+      console.log('[endCall] response status:', res.status);
       const data = await res.json().catch(() => null);
-      console.log('[endCall] /api/post-call response:', res.status, data);
+      console.log('[endCall] response body:', JSON.stringify(data).slice(0, 300));
 
       if (!res.ok) {
         setPostCallError(data?.error ?? `Server error ${res.status}`);
       } else if (data?._scoreError) {
-        // Call was saved but AI scoring failed — show the report view with the error
         setPostCallError(data._scoreError);
         if (data.callId) setPostCallReport({ ...data, overallScore: 0 } as PostCallReportType);
       } else if (data?._persistError) {
         setPostCallError(data._persistError);
       } else {
         setPostCallReport(data as PostCallReportType);
+        console.log('[endCall] navigate to report — score:', data?.overallScore);
       }
     } catch (err) {
-      console.error('[endCall] fetch /api/post-call threw:', err);
+      console.error('[endCall] POST /api/post-call threw:', err);
       setPostCallError(`Network error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoadingReport(false);
