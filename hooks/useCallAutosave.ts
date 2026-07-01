@@ -47,16 +47,25 @@ export function useCallAutosave(getPayload: () => AutosavePayload): UseCallAutos
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (res.ok) setLastSavedAt(new Date());
-    } catch {
-      // Best-effort — a missed autosave tick is not fatal, the next one retries.
+      if (res.ok) {
+        setLastSavedAt(new Date());
+      } else {
+        const body = await res.json().catch(() => ({}));
+        console.error('[useCallAutosave] autosave failed:', res.status, body);
+      }
+    } catch (err) {
+      console.error('[useCallAutosave] autosave network error:', err);
     }
   }, []);
 
   const startCall = useCallback(async () => {
     try {
       const res = await fetch('/api/calls/start', { method: 'POST' });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error('[useCallAutosave] /api/calls/start failed:', res.status, body);
+        return null;
+      }
       const { callId: newId } = await res.json();
       callIdRef.current = newId;
       setCallId(newId);

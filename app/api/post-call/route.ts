@@ -55,8 +55,12 @@ async function persistCall(
       .eq('user_id', userId)
       .select('id')
       .single();
-    if (error || !data) callId = null; // fall through to insert if the row didn't exist/wasn't ours
-    else callId = data.id;
+    if (error || !data) {
+      if (error) console.error('[post-call] calls update failed:', error.message, error.details);
+      callId = null; // fall through to insert
+    } else {
+      callId = data.id;
+    }
   }
 
   if (!callId) {
@@ -65,11 +69,14 @@ async function persistCall(
       .insert({ user_id: userId, started_at: startedAt, ...callPayload } as never)
       .select('id')
       .single();
-    if (error || !data) return null;
+    if (error || !data) {
+      console.error('[post-call] calls insert failed:', error?.message, error?.details);
+      return null;
+    }
     callId = data.id;
   }
 
-  await supabase.from('call_scores').upsert({
+  const { error: scoreError } = await supabase.from('call_scores').upsert({
     user_id: userId,
     call_id: callId,
     overall_score: report.overallScore ?? 0,
@@ -103,6 +110,8 @@ async function persistCall(
     crm_notes: report.crmNotes ?? '',
     improvement_plan: report.improvementPlan ?? [],
   } as never, { onConflict: 'call_id' });
+
+  if (scoreError) console.error('[post-call] call_scores upsert failed:', scoreError.message, scoreError.details);
 
   return callId;
 }

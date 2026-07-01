@@ -63,7 +63,7 @@ export function QuickObjectionBar() {
                 {response.keyPhrases.map((p: string, i: number) => (
                   <div key={i} className="flex items-start gap-1.5">
                     <span className="text-green-400 text-[10px] shrink-0">✓</span>
-                    <p className="text-[10px] text-slate-300 italic">"{p}"</p>
+                    <p className="text-[10px] text-slate-300 italic">&quot;{p}&quot;</p>
                   </div>
                 ))}
               </div>
@@ -74,7 +74,7 @@ export function QuickObjectionBar() {
                 {response.avoidPhrases.map((p: string, i: number) => (
                   <div key={i} className="flex items-start gap-1.5">
                     <span className="text-red-400 text-[10px] shrink-0">✕</span>
-                    <p className="text-[10px] text-slate-500 italic">"{p}"</p>
+                    <p className="text-[10px] text-slate-500 italic">&quot;{p}&quot;</p>
                   </div>
                 ))}
               </div>

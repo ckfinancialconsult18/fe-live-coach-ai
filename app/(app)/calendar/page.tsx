@@ -135,7 +135,7 @@ export default function CalendarPage() {
       {/* Today's agenda strip */}
       {todayAppts.length > 0 && (
         <div className="glass-card rounded-2xl p-4">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Today's Schedule</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Today&apos;s Schedule</p>
           <div className="flex gap-3 overflow-x-auto pb-1">
             {todayAppts.map((a) => (
               <div key={a.id} className={`shrink-0 rounded-xl border px-4 py-3 min-w-[200px] ${typeColor[a.type]}`}>
