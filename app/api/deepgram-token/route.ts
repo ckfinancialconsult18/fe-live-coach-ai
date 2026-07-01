@@ -30,6 +30,9 @@ export async function POST() {
     );
   }
 
+  console.log('[deepgram-token] creating ephemeral key — projectId:', projectId,
+    '| apiKey prefix:', apiKey.slice(0, 8) + '...');
+
   try {
     const res = await fetch(`https://api.deepgram.com/v1/projects/${projectId}/keys`, {
       method: 'POST',
@@ -44,23 +47,38 @@ export async function POST() {
       }),
     });
 
+    const responseText = await res.text().catch(() => '');
+    console.log('[deepgram-token] Deepgram response — status:', res.status,
+      '| body:', responseText.slice(0, 500));
+
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      return NextResponse.json(
-        { error: `Deepgram key creation failed (HTTP ${res.status}): ${text.slice(0, 200)}` },
-        { status: 502 }
-      );
+      const msg = `Deepgram key creation failed (HTTP ${res.status}): ${responseText.slice(0, 300)}`;
+      console.error('[deepgram-token]', msg);
+      return NextResponse.json({ error: msg }, { status: 502 });
     }
 
-    const data = await res.json() as { key?: string };
-    if (!data.key) {
+    let data: { key?: string; api_key?: { key?: string } };
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error('[deepgram-token] failed to parse Deepgram JSON:', responseText.slice(0, 200));
+      return NextResponse.json({ error: 'Deepgram returned non-JSON response' }, { status: 502 });
+    }
+
+    // Deepgram API v1 returns the key at top-level `key` field
+    const ephemeralKey = data.key ?? data.api_key?.key;
+    if (!ephemeralKey) {
+      console.error('[deepgram-token] key field missing from response — full body:', responseText.slice(0, 500));
       return NextResponse.json({ error: 'Deepgram response missing key field' }, { status: 502 });
     }
 
-    return NextResponse.json({ key: data.key });
+    console.log('[deepgram-token] ephemeral key issued — prefix:', ephemeralKey.slice(0, 8) + '...');
+    return NextResponse.json({ key: ephemeralKey });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[deepgram-token] fetch to Deepgram threw:', msg);
     return NextResponse.json(
-      { error: `Failed to reach Deepgram: ${err instanceof Error ? err.message : String(err)}` },
+      { error: `Failed to reach Deepgram: ${msg}` },
       { status: 500 }
     );
   }

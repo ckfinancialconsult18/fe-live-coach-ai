@@ -325,11 +325,47 @@ export default function LiveCallPage() {
       console.log('[endCall] response body:', JSON.stringify(data).slice(0, 300));
 
       if (!res.ok) {
+        console.error('[endCall] /api/post-call non-OK — status:', res.status, '| body:', JSON.stringify(data));
         setPostCallError(data?.error ?? `Server error ${res.status}`);
       } else if (data?._scoreError) {
+        console.warn('[endCall] AI scoring failed (call saved) — error:', data._scoreError);
         setPostCallError(data._scoreError);
-        if (data.callId) setPostCallReport({ ...data, overallScore: 0 } as PostCallReportType);
+        // Build a safe partial report: all AI array/string fields defaulted so the
+        // view renders without crashing even though OpenAI returned no data.
+        const emptyQuality = { confidence: 0, authority: 0, empathy: 0, listening: 0, pacing: 0, control: 0, objectionHandling: 0, discovery: 0, closing: 0, compliance: 0, naturalness: 0, overallSalesEffectiveness: 0 };
+        setPostCallReport({
+          callId: data.callId ?? null,
+          summary: '',
+          overallScore: 0,
+          rapportScore: 0,
+          discoveryScore: 0,
+          trustScore: 0,
+          closingScore: 0,
+          talkPct: metricsSnapshot.talkPct,
+          listenPct: metricsSnapshot.listenPct,
+          questionsAskedCount: 0,
+          scores: {},
+          qualityScores: emptyQuality,
+          timeline: timelineSnapshot,
+          strengths: [],
+          missedOpportunities: [],
+          buyingSignals: [],
+          objections: [],
+          objectionsHandling: [],
+          mostEffectiveMoments: [],
+          weakestMoments: [],
+          whatShouldHaveBeenDifferent: [],
+          aiCoachingSummary: '',
+          threeBiggestImprovements: [],
+          threeBiggestStrengths: [],
+          overallGrade: 'N/A',
+          followUpText: '',
+          followUpEmail: '',
+          crmNotes: '',
+          improvementPlan: [],
+        } as PostCallReportType);
       } else if (data?._persistError) {
+        console.error('[endCall] persist error:', data._persistError);
         setPostCallError(data._persistError);
       } else {
         setPostCallReport(data as PostCallReportType);
@@ -518,11 +554,20 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
     );
   }
 
-  const overallColor = scoreColor(report.overallScore);
-  const highlightTerms = [
-    ...report.objections,
-    ...report.buyingSignals,
-  ].filter(Boolean);
+  // Defensive defaults — OpenAI may return a partial or empty report (e.g. on 429).
+  // Guard every array access so we never throw "X is not iterable".
+  const objections = report.objections ?? [];
+  const buyingSignals = report.buyingSignals ?? [];
+  const objectionsHandling = report.objectionsHandling ?? [];
+  const threeBiggestStrengths = report.threeBiggestStrengths ?? [];
+  const threeBiggestImprovements = report.threeBiggestImprovements ?? [];
+  const mostEffectiveMoments = report.mostEffectiveMoments ?? [];
+  const weakestMoments = report.weakestMoments ?? [];
+  const whatShouldHaveBeenDifferent = report.whatShouldHaveBeenDifferent ?? [];
+  const aiUnavailable = !report.summary && !report.overallScore;
+
+  const overallColor = scoreColor(report.overallScore ?? 0);
+  const highlightTerms = [...objections, ...buyingSignals].filter(Boolean);
 
   const filteredTranscript = search
     ? transcript.filter((l) => l.text.toLowerCase().includes(search.toLowerCase()))
@@ -530,20 +575,29 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {error && (
+      {/* AI unavailable banner — shown when OpenAI returned an error (e.g. 429) */}
+      {(error || aiUnavailable) && (
         <div className="shrink-0 mx-6 mt-4 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/8 text-xs text-amber-300 leading-relaxed">
-          <span className="font-semibold">Note: </span>{error}
+          <span className="font-semibold">AI analysis unavailable</span>
+          {error ? ` — ${error}` : ' because the AI provider returned an error.'}
+          {' '}Your call has been saved. The transcript is available below.
         </div>
       )}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/6 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-100">Post-Call Report</h2>
-          <p className="text-sm text-slate-500 mt-1">{report.summary}</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {report.summary || (aiUnavailable ? 'Completed with AI unavailable' : '')}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-center">
-            <p className="text-3xl font-extrabold" style={{ color: overallColor }}>{report.overallScore}</p>
-            <p className="text-[10px] text-slate-500">Overall · Grade {report.overallGrade}</p>
+            <p className="text-3xl font-extrabold" style={{ color: overallColor }}>
+              {report.overallScore ?? 0}
+            </p>
+            <p className="text-[10px] text-slate-500">
+              Overall · Grade {report.overallGrade || 'N/A'}
+            </p>
           </div>
           <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/8 text-slate-300 text-sm hover:bg-white/12 transition-colors">
             ← New Call
@@ -571,8 +625,8 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
             {/* Score summary row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                ['Rapport', report.rapportScore], ['Discovery', report.discoveryScore],
-                ['Trust', report.trustScore], ['Closing', report.closingScore],
+                ['Rapport', report.rapportScore ?? 0], ['Discovery', report.discoveryScore ?? 0],
+                ['Trust', report.trustScore ?? 0], ['Closing', report.closingScore ?? 0],
               ].map(([label, val]) => (
                 <div key={label as string} className="glass-card rounded-xl p-4 text-center">
                   <p className="text-2xl font-bold" style={{ color: scoreColor(val as number) }}>{val}</p>
@@ -582,13 +636,13 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Quality Radar */}
+              {/* Quality Radar — guarded: qualityScores may be empty object when AI unavailable */}
               <div className="glass-card rounded-2xl p-5 flex flex-col items-center xl:col-span-1">
                 <h3 className="text-sm font-semibold text-slate-200 self-start mb-2">AI Quality Score</h3>
-                <RadarChart scores={report.qualityScores} size={260} />
+                <RadarChart scores={report.qualityScores ?? {} as import('@/lib/types').QualityScores} size={260} />
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 w-full mt-2 text-[10px] text-slate-500">
-                  <p>Talk/Listen: <span className="text-slate-300 font-medium">{report.talkPct}% / {report.listenPct}%</span></p>
-                  <p>Questions Asked: <span className="text-slate-300 font-medium">{report.questionsAskedCount}</span></p>
+                  <p>Talk/Listen: <span className="text-slate-300 font-medium">{report.talkPct ?? 0}% / {report.listenPct ?? 0}%</span></p>
+                  <p>Questions Asked: <span className="text-slate-300 font-medium">{report.questionsAskedCount ?? 0}</span></p>
                 </div>
               </div>
 
@@ -596,27 +650,37 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
               <div className="space-y-4 xl:col-span-1">
                 <div className="glass-card rounded-2xl p-5 space-y-3">
                   <h3 className="text-sm font-semibold text-green-400">✓ Three Biggest Strengths</h3>
-                  {report.threeBiggestStrengths.map((s, i) => (
-                    <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-green-400 font-bold">{i + 1}.</span>{s}</p>
-                  ))}
+                  {threeBiggestStrengths.length === 0
+                    ? <p className="text-xs text-slate-600">Not available</p>
+                    : threeBiggestStrengths.map((s, i) => (
+                        <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-green-400 font-bold">{i + 1}.</span>{s}</p>
+                      ))
+                  }
                 </div>
                 <div className="glass-card rounded-2xl p-5 space-y-3">
                   <h3 className="text-sm font-semibold text-amber-400">⚡ Three Biggest Improvements</h3>
-                  {report.threeBiggestImprovements.map((s, i) => (
-                    <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-amber-400 font-bold">{i + 1}.</span>{s}</p>
-                  ))}
+                  {threeBiggestImprovements.length === 0
+                    ? <p className="text-xs text-slate-600">Not available</p>
+                    : threeBiggestImprovements.map((s, i) => (
+                        <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-amber-400 font-bold">{i + 1}.</span>{s}</p>
+                      ))
+                  }
                 </div>
               </div>
 
               {/* AI Coaching Summary */}
               <div className="space-y-4 xl:col-span-1">
                 <div className="glass-card rounded-2xl p-5 space-y-2" style={{ border: '1px solid rgba(212,175,55,0.25)' }}>
-                  <h3 className="text-sm font-semibold text-[#D4AF37]">🤖 AI Coaching Summary</h3>
-                  <p className="text-xs text-slate-300 leading-relaxed">{report.aiCoachingSummary}</p>
+                  <h3 className="text-sm font-semibold text-[#D4AF37]">AI Coaching Summary</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {report.aiCoachingSummary || <span className="text-slate-600">Not available</span>}
+                  </p>
                 </div>
                 <div className="glass-card rounded-2xl p-5 space-y-2">
-                  <h3 className="text-sm font-semibold text-slate-300">📁 CRM Notes</h3>
-                  <p className="text-xs text-slate-400 leading-relaxed">{report.crmNotes}</p>
+                  <h3 className="text-sm font-semibold text-slate-300">CRM Notes</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {report.crmNotes || <span className="text-slate-600">Not available</span>}
+                  </p>
                 </div>
               </div>
             </div>
@@ -624,21 +688,27 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="glass-card rounded-2xl p-5 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-200">Most Effective Moments</h3>
-                {report.mostEffectiveMoments.map((m, i) => (
-                  <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-green-400">•</span>{m}</p>
-                ))}
+                {mostEffectiveMoments.length === 0
+                  ? <p className="text-xs text-slate-600">Not available</p>
+                  : mostEffectiveMoments.map((m, i) => (
+                      <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-green-400">•</span>{m}</p>
+                    ))
+                }
               </div>
               <div className="glass-card rounded-2xl p-5 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-200">Weakest Moments</h3>
-                {report.weakestMoments.map((m, i) => (
-                  <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-red-400">•</span>{m}</p>
-                ))}
+                {weakestMoments.length === 0
+                  ? <p className="text-xs text-slate-600">Not available</p>
+                  : weakestMoments.map((m, i) => (
+                      <p key={i} className="text-xs text-slate-300 flex gap-2"><span className="text-red-400">•</span>{m}</p>
+                    ))
+                }
               </div>
             </div>
 
             <div className="glass-card rounded-2xl p-5 space-y-3">
               <h3 className="text-sm font-semibold text-slate-200">Objections Encountered &amp; How Handled</h3>
-              {report.objectionsHandling.map((o, i) => (
+              {objectionsHandling.map((o, i) => (
                 <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg bg-white/4">
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${o.handled ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
                     {o.handled ? 'Handled' : 'Unresolved'}
@@ -649,26 +719,33 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
                   </div>
                 </div>
               ))}
-              {report.objectionsHandling.length === 0 && <p className="text-xs text-slate-600">No objections encountered.</p>}
+              {objectionsHandling.length === 0 && <p className="text-xs text-slate-600">No objections encountered.</p>}
             </div>
 
             <div className="glass-card rounded-2xl p-5 space-y-3">
               <h3 className="text-sm font-semibold text-[#D4AF37]">What Should Have Happened Differently</h3>
-              {report.whatShouldHaveBeenDifferent.map((s, i) => (
-                <p key={i} className="text-xs text-slate-300 flex gap-2">
-                  <span className="text-[#D4AF37] font-bold shrink-0">{i + 1}.</span>{s}
-                </p>
-              ))}
+              {whatShouldHaveBeenDifferent.length === 0
+                ? <p className="text-xs text-slate-600">Not available</p>
+                : whatShouldHaveBeenDifferent.map((s, i) => (
+                    <p key={i} className="text-xs text-slate-300 flex gap-2">
+                      <span className="text-[#D4AF37] font-bold shrink-0">{i + 1}.</span>{s}
+                    </p>
+                  ))
+              }
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="glass-card rounded-2xl p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-blue-400">📱 Follow-up Text</h3>
-                <p className="text-xs text-slate-300 leading-relaxed bg-white/4 rounded-lg p-3 border border-white/6">{report.followUpText}</p>
+                <h3 className="text-sm font-semibold text-blue-400">Follow-up Text</h3>
+                <p className="text-xs text-slate-300 leading-relaxed bg-white/4 rounded-lg p-3 border border-white/6">
+                  {report.followUpText || <span className="text-slate-600">Not available</span>}
+                </p>
               </div>
               <div className="glass-card rounded-2xl p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-violet-400">✉️ Follow-up Email</h3>
-                <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line bg-white/4 rounded-lg p-3 border border-white/6">{report.followUpEmail}</p>
+                <h3 className="text-sm font-semibold text-violet-400">Follow-up Email</h3>
+                <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line bg-white/4 rounded-lg p-3 border border-white/6">
+                  {report.followUpEmail || <span className="text-slate-600">Not available</span>}
+                </p>
               </div>
             </div>
           </div>
