@@ -16,7 +16,7 @@ export interface UseDeepgramTranscriptionReturn {
   transcript: TranscriptLine[];
   partial: PartialTranscript | null;
   connectionState: ConnectionState;
-  /** Which STT backend is active: Deepgram Nova-3 or browser Web Speech API fallback. */
+  /** Which STT backend is active: Deepgram Nova-3 (chunked) or browser Web Speech API fallback. */
   transcriptionMode: TranscriptionMode | null;
   isListening: boolean;
   error: string | null;
@@ -28,27 +28,16 @@ export interface UseDeepgramTranscriptionReturn {
 
 const MAX_RECONNECT = 5;
 const RECONNECT_BASE_MS = 1000;
+const CHUNK_INTERVAL_MS = 3000;
 
 let lineSeq = 0;
 function nextId() { return `dg-${++lineSeq}`; }
 
-// Deepgram response types (minimal — only what we consume)
 interface DeepgramWord {
   word: string;
+  punctuated_word?: string;
   speaker?: number;
   confidence?: number;
-  punctuated_word?: string;
-}
-interface DeepgramAlternative {
-  transcript: string;
-  confidence: number;
-  words: DeepgramWord[];
-}
-interface DeepgramResultsEvent {
-  type: 'Results';
-  channel: { alternatives: DeepgramAlternative[] };
-  is_final: boolean;
-  speech_final: boolean;
 }
 
 function dominantSpeaker(words: DeepgramWord[]): 'agent' | 'prospect' {
@@ -98,19 +87,18 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const speechRef = useRef<SpeechRecognitionInstance | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const shouldReconnectRef = useRef(false);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const shouldReconnectRef = useRef(false);
   const micRef = useRef(mic);
-  const connectRef = useRef<() => Promise<void>>(async () => {});
-  // Accumulate is_final chunks until speech_final flushes them as one line
-  const finalBufferRef = useRef('');
-  const finalSpeakerRef = useRef<'agent' | 'prospect'>('agent');
-  const finalConfidenceRef = useRef(80);
+  // Set to true once we decide to use Web Speech (so onstop doesn't re-start Deepgram)
+  const usingWebSpeechRef = useRef(false);
+
+  // Function refs — updated each render so MediaRecorder callbacks never hold stale closures
+  const startWebSpeechRef = useRef<() => void>(() => {});
+  const startDeepgramRef = useRef<() => void>(() => {});
 
   useEffect(() => { micRef.current = mic; }, [mic]);
 
@@ -121,13 +109,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       ...prev,
       { id: nextId(), speaker, text: text.trim(), timestamp: new Date(), speakerConfidence: confidence },
     ]);
-  }, []);
-
-  const teardownAudio = useCallback(() => {
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-    sourceRef.current?.disconnect();
-    sourceRef.current = null;
   }, []);
 
   // ── Web Speech API fallback ─────────────────────────────────────────────────
@@ -200,196 +181,173 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     }
   }, [addLine]);
 
-  // ── Deepgram connection ─────────────────────────────────────────────────────
+  useEffect(() => { startWebSpeechRef.current = startWebSpeech; }, [startWebSpeech]);
 
-  const connect = useCallback(async () => {
+  // ── Deepgram chunked transcription ──────────────────────────────────────────
+  // Audio is captured via MediaRecorder in CHUNK_INTERVAL_MS slices.
+  // Each slice is POSTed to /api/transcribe, which calls Deepgram's pre-recorded
+  // REST API server-side using DEEPGRAM_API_KEY. The API key never leaves the server.
+
+  const sendChunk = useCallback(async (blob: Blob) => {
+    if (!blob.size) return;
+
+    // Strip codec parameters — Deepgram accepts base MIME type only in Content-Type
+    const contentType = (blob.type || 'audio/webm').split(';')[0].trim();
+
+    try {
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': contentType },
+        body: blob,
+      });
+
+      if (res.status === 503) {
+        // DEEPGRAM_API_KEY not set on server — fall back to Web Speech API
+        console.warn('[transcription] Deepgram not configured (503), switching to Web Speech API');
+        usingWebSpeechRef.current = true;
+        if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+        startWebSpeechRef.current();
+        return;
+      }
+
+      if (!res.ok) {
+        console.error('[transcription] /api/transcribe returned', res.status);
+        return; // Skip this chunk but keep recording
+      }
+
+      const data = await res.json() as {
+        transcript?: string;
+        words?: DeepgramWord[];
+        confidence?: number;
+        error?: string;
+      };
+
+      if (data.error) {
+        console.error('[transcription] server error in chunk response:', data.error);
+        return;
+      }
+
+      const words = data.words ?? [];
+      const text = words.length > 0
+        ? words.map((w) => w.punctuated_word ?? w.word).join(' ').trim()
+        : (data.transcript?.trim() ?? '');
+
+      if (!text) return;
+
+      addLine(text, dominantSpeaker(words), Math.round((data.confidence ?? 0.8) * 100));
+    } catch (err) {
+      console.error('[transcription] sendChunk network error:', err instanceof Error ? err.message : err);
+    }
+  }, [addLine]);
+
+  const startDeepgram = useCallback(() => {
     const currentMic = micRef.current;
-    if (!currentMic.stream || !currentMic.audioContext) {
+    if (!currentMic.stream) {
       setError('Microphone is not active — cannot start transcription.');
       setConnectionState('failed');
       return;
     }
 
-    setConnectionState(reconnectAttemptRef.current > 0 ? 'reconnecting' : 'connecting');
+    if (typeof window === 'undefined' || !window.MediaRecorder) {
+      console.warn('[transcription] MediaRecorder not available, using Web Speech API');
+      usingWebSpeechRef.current = true;
+      startWebSpeechRef.current();
+      return;
+    }
+
+    // Pick the first supported container format
+    const mimeType = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4',
+    ].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+
+    setConnectionState('connecting');
     setError(null);
-    finalBufferRef.current = '';
+    usingWebSpeechRef.current = false;
 
     try {
-      // Exchange server-side secret for a short-lived Deepgram key
-      const tokenRes = await fetch('/api/deepgram-token', { method: 'POST' });
-      const tokenData = await tokenRes.json() as { key?: string; error?: string };
+      const recorder = new MediaRecorder(currentMic.stream, mimeType ? { mimeType } : {});
+      recorderRef.current = recorder;
 
-      if (!tokenRes.ok || !tokenData.key) {
-        // Deepgram not configured — fall back to Web Speech API
-        console.warn('Deepgram unavailable, falling back to Web Speech API:', tokenData.error);
-        startWebSpeech();
-        return;
-      }
-
-      const sampleRate = Math.round(currentMic.audioContext.sampleRate);
-
-      const params = new URLSearchParams({
-        model: 'nova-3',
-        language: 'en-US',
-        encoding: 'linear16',
-        sample_rate: String(sampleRate),
-        channels: '1',
-        interim_results: 'true',
-        smart_format: 'true',
-        punctuate: 'true',
-        diarize: 'true',
-        endpointing: '300',
-        utterance_end_ms: '1000',
-      });
-
-      // Browser WebSocket auth: Deepgram accepts the API key as a subprotocol
-      // (this is exactly how the official @deepgram/sdk handles browser auth)
-      const ws = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?${params.toString()}`,
-        ['token', tokenData.key]
-      );
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
-
-      ws.onopen = () => {
+      recorder.onstart = () => {
         reconnectAttemptRef.current = 0;
         setConnectionState('connected');
         setTranscriptionMode('deepgram');
-
-        // Audio pipeline: MediaStream → ScriptProcessor → PCM16 → Deepgram binary WS messages
-        const ctx = currentMic.audioContext!;
-        const source = ctx.createMediaStreamSource(currentMic.stream!);
-        const processor = ctx.createScriptProcessor(4096, 1, 1);
-        sourceRef.current = source;
-        processorRef.current = processor;
-
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          const input = e.inputBuffer.getChannelData(0);
-          const pcm16 = new Int16Array(input.length);
-          for (let i = 0; i < input.length; i++) {
-            pcm16[i] = Math.max(-32768, Math.min(32767, Math.round(input[i] * 32767)));
-          }
-          ws.send(pcm16.buffer);
-        };
-
-        source.connect(processor);
-        processor.connect(ctx.destination);
+        console.log('[transcription] MediaRecorder started — mimeType:', recorder.mimeType);
       };
 
-      ws.onmessage = (event) => {
-        if (typeof event.data !== 'string') return;
-        try {
-          const msg = JSON.parse(event.data) as DeepgramResultsEvent & { type: string; message?: string };
-
-          if (msg.type === 'Results') {
-            const alt = msg.channel?.alternatives?.[0];
-            if (!alt) return;
-            const text = alt.transcript ?? '';
-            const words = alt.words ?? [];
-            const speaker = dominantSpeaker(words);
-            const confidence = Math.round((alt.confidence ?? 0.8) * 100);
-
-            if (!msg.is_final) {
-              // Interim result — live preview while the speaker is talking
-              if (text.trim()) setPartial({ speaker, text: text.trim() });
-            } else {
-              // Finalized chunk — accumulate until speech_final flushes as one line
-              if (text.trim()) {
-                finalBufferRef.current = finalBufferRef.current
-                  ? `${finalBufferRef.current} ${text.trim()}`
-                  : text.trim();
-                finalSpeakerRef.current = speaker;
-                finalConfidenceRef.current = confidence;
-              }
-              if (msg.speech_final) {
-                const full = finalBufferRef.current.trim();
-                finalBufferRef.current = '';
-                if (full) addLine(full, finalSpeakerRef.current, finalConfidenceRef.current);
-              }
-            }
-          } else if (msg.type === 'UtteranceEnd') {
-            // Flush any accumulated final text when Deepgram detects end-of-utterance
-            const full = finalBufferRef.current.trim();
-            finalBufferRef.current = '';
-            if (full) addLine(full, finalSpeakerRef.current, finalConfidenceRef.current);
-            setPartial(null);
-          } else if (msg.type === 'Error') {
-            setError(`Deepgram error: ${msg.message ?? 'Unknown error'}`);
-          }
-        } catch { /* ignore malformed frames */ }
-      };
-
-      ws.onerror = () => {
-        setError('Deepgram WebSocket error — check network and API key.');
-      };
-
-      ws.onclose = () => {
-        teardownAudio();
-        // Flush any buffered text before reconnect so nothing is lost
-        const buffered = finalBufferRef.current.trim();
-        if (buffered) {
-          addLine(buffered, finalSpeakerRef.current, finalConfidenceRef.current);
-          finalBufferRef.current = '';
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          // Fire-and-forget: errors are caught inside sendChunk
+          void sendChunk(e.data);
         }
-        setPartial(null);
+      };
 
+      recorder.onerror = (e: Event) => {
+        console.error('[transcription] MediaRecorder error:', e);
+        setError('Recording error occurred.');
+      };
+
+      recorder.onstop = () => {
+        recorderRef.current = null;
+        if (usingWebSpeechRef.current) return; // Switching to Web Speech — don't reconnect Deepgram
         if (shouldReconnectRef.current && reconnectAttemptRef.current < MAX_RECONNECT) {
           reconnectAttemptRef.current++;
           setConnectionState('reconnecting');
-          const delay = RECONNECT_BASE_MS * Math.pow(2, reconnectAttemptRef.current - 1);
-          reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
-        } else if (shouldReconnectRef.current) {
-          setConnectionState('failed');
-          setError('Lost connection to Deepgram after multiple attempts. Check your API key and network.');
-          shouldReconnectRef.current = false;
+          reconnectTimerRef.current = setTimeout(() => startDeepgramRef.current(), RECONNECT_BASE_MS);
         } else {
           setConnectionState('idle');
         }
       };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error starting transcription';
-      setError(msg);
-      setConnectionState('failed');
-    }
-  }, [addLine, teardownAudio, startWebSpeech]);
 
-  useEffect(() => { connectRef.current = connect; }, [connect]);
+      recorder.start(CHUNK_INTERVAL_MS);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Could not start recording: ${msg}`);
+      setConnectionState('failed');
+      console.error('[transcription] MediaRecorder.start() threw:', msg);
+    }
+  }, [sendChunk]);
+
+  useEffect(() => { startDeepgramRef.current = startDeepgram; }, [startDeepgram]);
+
+  // ── Public API ──────────────────────────────────────────────────────────────
 
   const startListening = useCallback(async () => {
     shouldReconnectRef.current = true;
     reconnectAttemptRef.current = 0;
-    finalBufferRef.current = '';
-    await connect();
-  }, [connect]);
+    usingWebSpeechRef.current = false;
+    startDeepgramRef.current();
+  }, []);
 
   const stopListening = useCallback(() => {
     shouldReconnectRef.current = false;
-    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-    teardownAudio();
-    if (wsRef.current) {
-      // Tell Deepgram we're done so it can flush any remaining audio
-      if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (recorderRef.current) {
+      if (recorderRef.current.state !== 'inactive') {
+        recorderRef.current.stop(); // triggers final ondataavailable + onstop
       }
-      wsRef.current.close();
-      wsRef.current = null;
+      recorderRef.current = null;
     }
     if (speechRef.current) {
-      speechRef.current.onend = null;
-      speechRef.current.abort();
+      speechRef.current.onend = null; // prevent auto-reconnect
+      try { speechRef.current.abort(); } catch { /* ignore NotSupportedError */ }
       speechRef.current = null;
     }
     setConnectionState('idle');
     setPartial(null);
-    finalBufferRef.current = '';
-  }, [teardownAudio]);
+  }, []);
 
   const clearTranscript = useCallback(() => {
     setTranscript([]);
     setPartial(null);
     lineSeq = 0;
-    finalBufferRef.current = '';
   }, []);
 
   const correctSpeaker = useCallback((targetId: string) => {
