@@ -16,7 +16,6 @@ export interface UseDeepgramTranscriptionReturn {
   transcript: TranscriptLine[];
   partial: PartialTranscript | null;
   connectionState: ConnectionState;
-  /** Which STT backend is active: Deepgram Nova-3 (chunked) or browser Web Speech API fallback. */
   transcriptionMode: TranscriptionMode | null;
   isListening: boolean;
   error: string | null;
@@ -28,7 +27,11 @@ export interface UseDeepgramTranscriptionReturn {
 
 const MAX_RECONNECT = 5;
 const RECONNECT_BASE_MS = 1000;
-const CHUNK_INTERVAL_MS = 3000;
+// How long to record each chunk before stopping and POSTing.
+// Each stop+start produces a complete WebM file — Deepgram can decode every chunk.
+const CHUNK_INTERVAL_MS = 4000;
+// Minimum blob size to bother sending (avoids POSTing empty/header-only blobs)
+const MIN_CHUNK_BYTES = 500;
 
 let lineSeq = 0;
 function nextId() { return `dg-${++lineSeq}`; }
@@ -51,24 +54,18 @@ function dominantSpeaker(words: DeepgramWord[]): 'agent' | 'prospect' {
   return Number(top[0]) === 0 ? 'agent' : 'prospect';
 }
 
-// ── Web Speech API minimal type shim ──────────────────────────────────────────
+// ── Web Speech API shim ───────────────────────────────────────────────────────
 interface SpeechRecognitionEvent {
   results: { [i: number]: { [j: number]: { transcript: string; confidence: number }; isFinal: boolean; length: number } };
   resultIndex: number;
 }
 interface SpeechRecognitionErrorEvent { error: string; message?: string }
 interface SpeechRecognitionInstance {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
+  continuous: boolean; interimResults: boolean; lang: string; maxAlternatives: number;
   onresult: ((e: SpeechRecognitionEvent) => void) | null;
   onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  onstart: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
+  onend: (() => void) | null; onstart: (() => void) | null;
+  start: () => void; stop: () => void; abort: () => void;
 }
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
@@ -76,6 +73,17 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
   if (typeof window === 'undefined') return null;
   const w = window as unknown as Record<string, unknown>;
   return (w['SpeechRecognition'] ?? w['webkitSpeechRecognition'] ?? null) as SpeechRecognitionCtor | null;
+}
+
+function bestMimeType(): string {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+  ];
+  return candidates.find((t) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) ?? '';
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -89,16 +97,19 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const speechRef = useRef<SpeechRecognitionInstance | null>(null);
+  const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
   const reconnectAttemptRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const micRef = useRef(mic);
-  // Set to true once we decide to use Web Speech (so onstop doesn't re-start Deepgram)
   const usingWebSpeechRef = useRef(false);
+  // Combined stream (mic + system audio) used for recording
+  const combinedStreamRef = useRef<MediaStream | null>(null);
 
-  // Function refs — updated each render so MediaRecorder callbacks never hold stale closures
+  // Stable function refs to avoid stale closures inside MediaRecorder callbacks
   const startWebSpeechRef = useRef<() => void>(() => {});
-  const startDeepgramRef = useRef<() => void>(() => {});
+  const startChunkCycleRef = useRef<() => void>(() => {});
+  const sendChunkRef = useRef<(blob: Blob) => Promise<void>>(async () => {});
 
   useEffect(() => { micRef.current = mic; }, [mic]);
 
@@ -116,26 +127,20 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const startWebSpeech = useCallback(() => {
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
-      setError(
-        'Deepgram is not configured and the Web Speech API is not supported by this browser (try Chrome or Edge). ' +
-        'Live transcription cannot start.'
-      );
+      setError('Deepgram is not configured and the Web Speech API is not supported by this browser (try Chrome or Edge).');
       setConnectionState('failed');
       return;
     }
-
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     recognition.maxAlternatives = 1;
-
     recognition.onstart = () => {
       reconnectAttemptRef.current = 0;
       setConnectionState('connected');
       setTranscriptionMode('webspeech');
     };
-
     recognition.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
@@ -143,18 +148,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         const text = result[0]?.transcript ?? '';
         if (result.isFinal) {
           if (text.trim()) addLine(text, 'agent', Math.round((result[0]?.confidence ?? 0.5) * 100));
-        } else {
-          interim += text;
-        }
+        } else { interim += text; }
       }
       if (interim.trim()) setPartial({ speaker: 'agent', text: interim.trim() });
     };
-
     recognition.onerror = (e) => {
       if (e.error === 'aborted' || e.error === 'no-speech') return;
       setError(`Web Speech API error: ${e.error}${e.message ? ` — ${e.message}` : ''}`);
     };
-
     recognition.onend = () => {
       setPartial(null);
       if (shouldReconnectRef.current) {
@@ -173,7 +174,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         setConnectionState('idle');
       }
     };
-
     speechRef.current = recognition;
     try { recognition.start(); } catch (err) {
       setError(`Could not start Web Speech API: ${err instanceof Error ? err.message : String(err)}`);
@@ -183,16 +183,11 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   useEffect(() => { startWebSpeechRef.current = startWebSpeech; }, [startWebSpeech]);
 
-  // ── Deepgram chunked transcription ──────────────────────────────────────────
-  // Audio is captured via MediaRecorder in CHUNK_INTERVAL_MS slices.
-  // Each slice is POSTed to /api/transcribe, which calls Deepgram's pre-recorded
-  // REST API server-side using DEEPGRAM_API_KEY. The API key never leaves the server.
+  // ── Send chunk to server ────────────────────────────────────────────────────
 
   const sendChunk = useCallback(async (blob: Blob) => {
-    if (!blob.size) return;
-
-    // Strip codec parameters — Deepgram accepts base MIME type only in Content-Type
     const contentType = (blob.type || 'audio/webm').split(';')[0].trim();
+    console.log('[transcription] sending chunk — size:', blob.size, '| contentType:', contentType);
 
     try {
       const res = await fetch('/api/transcribe', {
@@ -201,29 +196,21 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         body: blob,
       });
 
+      console.log('[transcription] /api/transcribe responded — status:', res.status);
+
       if (res.status === 503) {
-        // DEEPGRAM_API_KEY not set on server — fall back to Web Speech API
-        console.warn('[transcription] Deepgram not configured (503), switching to Web Speech API');
+        console.warn('[transcription] Deepgram not configured (503) — switching to Web Speech API');
         usingWebSpeechRef.current = true;
-        if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
         startWebSpeechRef.current();
         return;
       }
 
-      if (!res.ok) {
-        console.error('[transcription] /api/transcribe returned', res.status);
-        return; // Skip this chunk but keep recording
-      }
-
-      const data = await res.json() as {
-        transcript?: string;
-        words?: DeepgramWord[];
-        confidence?: number;
-        error?: string;
+      const data = await res.json().catch(() => ({ error: 'non-JSON response' })) as {
+        transcript?: string; words?: DeepgramWord[]; confidence?: number; error?: string;
       };
 
-      if (data.error) {
-        console.error('[transcription] server error in chunk response:', data.error);
+      if (!res.ok || data.error) {
+        console.error('[transcription] server error:', data.error ?? `HTTP ${res.status}`);
         return;
       }
 
@@ -232,103 +219,209 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         ? words.map((w) => w.punctuated_word ?? w.word).join(' ').trim()
         : (data.transcript?.trim() ?? '');
 
-      if (!text) return;
-
-      addLine(text, dominantSpeaker(words), Math.round((data.confidence ?? 0.8) * 100));
+      console.log('[transcription] transcript received — length:', text.length, '| words:', words.length);
+      if (text) addLine(text, dominantSpeaker(words), Math.round((data.confidence ?? 0.8) * 100));
     } catch (err) {
       console.error('[transcription] sendChunk network error:', err instanceof Error ? err.message : err);
     }
   }, [addLine]);
 
-  const startDeepgram = useCallback(() => {
-    const currentMic = micRef.current;
-    if (!currentMic.stream) {
-      setError('Microphone is not active — cannot start transcription.');
+  useEffect(() => { sendChunkRef.current = sendChunk; }, [sendChunk]);
+
+  // ── One chunk cycle: record → stop → POST → repeat ─────────────────────────
+  //
+  // CRITICAL: We do NOT use MediaRecorder.start(timeslice). With a timeslice,
+  // the WebM initialization segment (EBML header) only appears in the very
+  // first ondataavailable event. Every subsequent event contains raw media
+  // segments with no header — Deepgram cannot decode them and returns 400.
+  //
+  // Instead we start a fresh MediaRecorder for each chunk and let it run to
+  // completion (start → stop). Each resulting blob is a complete, self-contained
+  // WebM file that Deepgram can decode independently.
+
+  const startChunkCycle = useCallback(() => {
+    if (!shouldReconnectRef.current || usingWebSpeechRef.current) return;
+
+    // Prefer combined stream (mic + system audio); fall back to mic-only
+    const stream = combinedStreamRef.current ?? micRef.current.stream;
+    if (!stream) {
+      console.error('[transcription] no audio stream available');
       setConnectionState('failed');
+      setError('Microphone is not active — cannot start transcription.');
       return;
     }
 
-    if (typeof window === 'undefined' || !window.MediaRecorder) {
-      console.warn('[transcription] MediaRecorder not available, using Web Speech API');
-      usingWebSpeechRef.current = true;
-      startWebSpeechRef.current();
+    // Log every audio track so we can see if any go dead
+    const tracks = stream.getAudioTracks();
+    tracks.forEach((t, i) => {
+      console.log(`[transcription] track[${i}] label="${t.label}" readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`);
+      if (t.readyState !== 'live') {
+        console.warn(`[transcription] track[${i}] is NOT live — readyState: ${t.readyState}`);
+      }
+      // Re-attach ended handler so we detect mid-call device changes
+      t.onended = () => {
+        console.warn(`[transcription] track[${i}] "${t.label}" ended unexpectedly`);
+      };
+    });
+
+    const liveTracks = tracks.filter((t) => t.readyState === 'live');
+    if (liveTracks.length === 0) {
+      console.error('[transcription] all audio tracks are ended — cannot record');
+      setConnectionState('failed');
+      setError('Microphone disconnected. Please check your audio device.');
       return;
     }
 
-    // Pick the first supported container format
-    const mimeType = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/ogg',
-      'audio/mp4',
-    ].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    const mimeType = bestMimeType();
+    const chunks: Blob[] = [];
 
-    setConnectionState('connecting');
-    setError(null);
-    usingWebSpeechRef.current = false;
-
+    let recorder: MediaRecorder;
     try {
-      const recorder = new MediaRecorder(currentMic.stream, mimeType ? { mimeType } : {});
-      recorderRef.current = recorder;
-
-      recorder.onstart = () => {
-        reconnectAttemptRef.current = 0;
-        setConnectionState('connected');
-        setTranscriptionMode('deepgram');
-        console.log('[transcription] MediaRecorder started — mimeType:', recorder.mimeType);
-      };
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          // Fire-and-forget: errors are caught inside sendChunk
-          void sendChunk(e.data);
-        }
-      };
-
-      recorder.onerror = (e: Event) => {
-        console.error('[transcription] MediaRecorder error:', e);
-        setError('Recording error occurred.');
-      };
-
-      recorder.onstop = () => {
-        recorderRef.current = null;
-        if (usingWebSpeechRef.current) return; // Switching to Web Speech — don't reconnect Deepgram
-        if (shouldReconnectRef.current && reconnectAttemptRef.current < MAX_RECONNECT) {
-          reconnectAttemptRef.current++;
-          setConnectionState('reconnecting');
-          reconnectTimerRef.current = setTimeout(() => startDeepgramRef.current(), RECONNECT_BASE_MS);
-        } else {
-          setConnectionState('idle');
-        }
-      };
-
-      recorder.start(CHUNK_INTERVAL_MS);
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[transcription] MediaRecorder constructor threw:', msg);
       setError(`Could not start recording: ${msg}`);
       setConnectionState('failed');
-      console.error('[transcription] MediaRecorder.start() threw:', msg);
+      return;
     }
-  }, [sendChunk]);
 
-  useEffect(() => { startDeepgramRef.current = startDeepgram; }, [startDeepgram]);
+    recorderRef.current = recorder;
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+    recorder.ondataavailable = (e) => {
+      console.log('[transcription] ondataavailable — size:', e.data.size, '| state:', recorder.state);
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+      console.log('[transcription] chunk complete — blob.size:', blob.size,
+        '| blob.type:', blob.type,
+        '| recorder.mimeType:', recorder.mimeType);
+
+      if (blob.size >= MIN_CHUNK_BYTES) {
+        void sendChunkRef.current(blob);
+      } else {
+        console.warn('[transcription] chunk below minimum size (', blob.size, 'bytes) — skipping');
+      }
+
+      // Schedule next cycle immediately — onstop is the clean restart point
+      if (shouldReconnectRef.current && !usingWebSpeechRef.current) {
+        startChunkCycleRef.current();
+      }
+    };
+
+    recorder.onerror = (e: Event) => {
+      console.error('[transcription] MediaRecorder.onerror:', e);
+    };
+
+    try {
+      recorder.start(); // NO timeslice — run until we explicitly call stop()
+      console.log('[transcription] MediaRecorder running — mimeType:', recorder.mimeType,
+        '| stopping in', CHUNK_INTERVAL_MS, 'ms');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[transcription] MediaRecorder.start() threw:', msg);
+      setError(`Could not start recording: ${msg}`);
+      setConnectionState('failed');
+      return;
+    }
+
+    // Stop after CHUNK_INTERVAL_MS — this triggers ondataavailable then onstop
+    chunkTimerRef.current = setTimeout(() => {
+      if (recorderRef.current?.state === 'recording') {
+        recorderRef.current.stop();
+      }
+    }, CHUNK_INTERVAL_MS);
+
+  }, []);
+
+  useEffect(() => { startChunkCycleRef.current = startChunkCycle; }, [startChunkCycle]);
+
+  // ── Request system audio (to capture speaker output / remote call) ──────────
+  // getUserMedia only captures the microphone. When the remote party speaks
+  // through the computer's speakers, that audio is NOT in the mic stream.
+  // getDisplayMedia with audio:true captures the system audio (loopback).
+  // We merge both tracks into a single stream so Deepgram hears both sides.
+
+  const acquireSystemAudio = useCallback(async (): Promise<MediaStream | null> => {
+    if (typeof navigator?.mediaDevices?.getDisplayMedia !== 'function') return null;
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: true, // required by most browsers to trigger the picker
+        audio: true,
+      });
+      // Stop the video track immediately — we only want audio
+      display.getVideoTracks().forEach((t) => t.stop());
+      const audioTracks = display.getAudioTracks();
+      console.log('[transcription] system audio tracks:', audioTracks.length,
+        '| labels:', audioTracks.map((t) => t.label).join(', '));
+      return audioTracks.length > 0 ? display : null;
+    } catch (err) {
+      // User cancelled the picker or browser doesn't allow audio-only getDisplayMedia
+      console.warn('[transcription] getDisplayMedia cancelled or unavailable:', err instanceof Error ? err.message : err);
+      return null;
+    }
+  }, []);
+
+  // ── Public startListening ───────────────────────────────────────────────────
 
   const startListening = useCallback(async () => {
     shouldReconnectRef.current = true;
     reconnectAttemptRef.current = 0;
     usingWebSpeechRef.current = false;
-    startDeepgramRef.current();
-  }, []);
+
+    if (typeof window === 'undefined' || !window.MediaRecorder) {
+      console.warn('[transcription] MediaRecorder not available — using Web Speech API');
+      usingWebSpeechRef.current = true;
+      startWebSpeechRef.current();
+      return;
+    }
+
+    setConnectionState('connecting');
+    setError(null);
+
+    // Try to acquire system audio to capture the remote party's voice through speakers.
+    // This is optional — if the user declines or the browser doesn't support it,
+    // we fall back to mic-only.
+    const micStream = micRef.current.stream;
+    if (!micStream) {
+      setError('Microphone is not active — cannot start transcription.');
+      setConnectionState('failed');
+      return;
+    }
+
+    const systemAudio = await acquireSystemAudio();
+
+    if (systemAudio) {
+      // Merge mic + system audio into a single stream
+      const ctx = new AudioContext();
+      const dest = ctx.createMediaStreamDestination();
+      const micSource = ctx.createMediaStreamSource(micStream);
+      const sysSource = ctx.createMediaStreamSource(systemAudio);
+      micSource.connect(dest);
+      sysSource.connect(dest);
+      combinedStreamRef.current = dest.stream;
+      console.log('[transcription] merged mic + system audio — combined tracks:',
+        dest.stream.getAudioTracks().length);
+    } else {
+      // Mic-only mode — remote call audio through speakers will NOT be transcribed
+      combinedStreamRef.current = null;
+      console.log('[transcription] mic-only mode (system audio not available)');
+    }
+
+    setConnectionState('connected');
+    setTranscriptionMode('deepgram');
+    startChunkCycleRef.current();
+  }, [acquireSystemAudio]);
+
+  // ── Public stopListening ────────────────────────────────────────────────────
 
   const stopListening = useCallback(() => {
     shouldReconnectRef.current = false;
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
+    if (chunkTimerRef.current) { clearTimeout(chunkTimerRef.current); chunkTimerRef.current = null; }
+    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+
     if (recorderRef.current) {
       if (recorderRef.current.state !== 'inactive') {
         recorderRef.current.stop(); // triggers final ondataavailable + onstop
@@ -336,9 +429,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       recorderRef.current = null;
     }
     if (speechRef.current) {
-      speechRef.current.onend = null; // prevent auto-reconnect
-      try { speechRef.current.abort(); } catch { /* ignore NotSupportedError */ }
+      speechRef.current.onend = null;
+      try { speechRef.current.abort(); } catch { /* ignore */ }
       speechRef.current = null;
+    }
+    // Clean up combined stream (system audio tracks)
+    if (combinedStreamRef.current) {
+      combinedStreamRef.current.getTracks().forEach((t) => t.stop());
+      combinedStreamRef.current = null;
     }
     setConnectionState('idle');
     setPartial(null);
@@ -363,15 +461,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   useEffect(() => () => stopListening(), [stopListening]);
 
   return {
-    transcript,
-    partial,
-    connectionState,
-    transcriptionMode,
+    transcript, partial, connectionState, transcriptionMode,
     isListening: connectionState === 'connected' || connectionState === 'reconnecting',
-    error,
-    startListening,
-    stopListening,
-    clearTranscript,
-    correctSpeaker,
+    error, startListening, stopListening, clearTranscript, correctSpeaker,
   };
 }
