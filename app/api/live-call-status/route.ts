@@ -2,6 +2,27 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 /**
+ * Builds a minimal valid WAV file (0.25s of 8kHz 16-bit mono silence) used to
+ * test the full Deepgram /v1/listen pipeline. If this request succeeds, the
+ * API key, plan, credits, and nova-2 model access are ALL verified — so any
+ * failure in /api/transcribe afterwards must be the audio payload itself.
+ */
+function buildTestWav(): ArrayBuffer {
+  const sampleRate = 8000;
+  const samples = sampleRate / 4; // 0.25s
+  const dataSize = samples * 2;
+  const buf = new Uint8Array(44 + dataSize); // data section stays zero = silence
+  const view = new DataView(buf.buffer);
+  const ascii = (offset: number, s: string) => { for (let i = 0; i < s.length; i++) buf[offset + i] = s.charCodeAt(i); };
+  ascii(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); ascii(8, 'WAVE');
+  ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  ascii(36, 'data'); view.setUint32(40, dataSize, true);
+  return view.buffer as ArrayBuffer;
+}
+
+/**
  * Pre-flight status check for the live call feature. Checks every requirement
  * independently so all failures surface at once with exact, actionable messages.
  * Visit /api/live-call-status in your browser for a full diagnostic report.
@@ -59,34 +80,41 @@ export async function GET() {
     };
   }
 
-  // 4. Deepgram — Nova-3 speech-to-text. Not a hard failure: if unconfigured,
-  //    transcription falls back to the browser's Web Speech API automatically.
+  // 4. Deepgram — verified with a REAL test transcription (tiny silent WAV),
+  //    not just a key check. If this passes, the key, plan, credits, and
+  //    nova-2 model access are all confirmed working — any later failure in
+  //    /api/transcribe is then provably an audio-payload problem, not account
+  //    config. Not a hard failure: if unconfigured, transcription falls back
+  //    to the browser's Web Speech API automatically.
   const deepgramKey = process.env.DEEPGRAM_API_KEY;
-  const deepgramProjectId = process.env.DEEPGRAM_PROJECT_ID;
 
-  if (!deepgramKey || !deepgramProjectId) {
+  if (!deepgramKey) {
     checks.deepgram = {
       ok: false,
       message:
-        (!deepgramKey ? 'DEEPGRAM_API_KEY is not set. ' : 'DEEPGRAM_PROJECT_ID is not set. ') +
-        'Create a free account at console.deepgram.com. ' +
+        'DEEPGRAM_API_KEY is not set. Create a free account at console.deepgram.com. ' +
         'Transcription will fall back to the browser Web Speech API (Chrome/Edge only) until this is configured.',
     };
   } else {
     try {
-      const res = await fetch(`https://api.deepgram.com/v1/projects/${deepgramProjectId}/keys`, {
+      const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-2', {
         method: 'POST',
-        headers: { Authorization: `Token ${deepgramKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ comment: 'status-check', scopes: ['usage:write'], time_to_live_in_seconds: 10 }),
+        headers: { Authorization: `Token ${deepgramKey}`, 'Content-Type': 'audio/wav' },
+        body: buildTestWav(),
       });
+      const text = await res.text().catch(() => '');
       if (res.ok) {
-        checks.deepgram = { ok: true, message: 'Deepgram Nova-3 is reachable and the API key is valid.' };
+        checks.deepgram = {
+          ok: true,
+          message: 'Deepgram accepted a real test transcription (API key, plan/credits, and nova-2 model access all verified).',
+        };
       } else {
-        const text = await res.text().catch(() => '');
+        console.error(`[live-call-status] Deepgram test transcription failed — HTTP ${res.status} | FULL BODY:\n${text}`);
         checks.deepgram = {
           ok: false,
-          message: `Deepgram key validation failed (HTTP ${res.status}): ${text.slice(0, 200)}. ` +
-            'Verify DEEPGRAM_API_KEY and DEEPGRAM_PROJECT_ID at console.deepgram.com.',
+          message: `Deepgram rejected a real test transcription (HTTP ${res.status}): ${text}. ` +
+            'This is the exact error /api/transcribe hits on every chunk. ' +
+            'Check the API key, plan/credits, and model access at console.deepgram.com.',
         };
       }
     } catch (err) {

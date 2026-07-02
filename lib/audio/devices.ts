@@ -31,21 +31,38 @@ export async function getMicPermissionState(): Promise<MicPermissionState> {
 }
 
 /**
- * Requests a microphone stream with explicit, production-appropriate constraints:
- * echo cancellation, noise suppression, and automatic gain control all enabled
- * (required for a laptop mic picking up both the agent's voice and a phone
- * speaker on the desk), plus an optional deviceId for device selection.
+ * Requests a microphone stream tuned for this app's core use case: a laptop
+ * mic picking up BOTH the agent's voice AND the phone call playing through the
+ * computer's speakers.
+ *
+ * echoCancellation and noiseSuppression MUST be off here. The echo canceller
+ * treats any audio coming out of the speakers as echo and subtracts it from
+ * the mic signal — it erases the remote party's voice entirely — and its
+ * half-duplex ducking suppresses the mic while speaker audio plays, so during
+ * a call almost nothing survives. noiseSuppression similarly attenuates
+ * far-field speaker audio. autoGainControl stays on: it boosts quiet distant
+ * audio and cancels nothing.
  */
 export async function requestMicrophoneStream(deviceId?: string): Promise<MediaStream> {
   const constraints: MediaStreamConstraints = {
     audio: {
       deviceId: deviceId ? { exact: deviceId } : undefined,
-      echoCancellation: true,
-      noiseSuppression: true,
+      echoCancellation: false,
+      noiseSuppression: false,
       autoGainControl: true,
       channelCount: 1,
     },
     video: false,
   };
-  return navigator.mediaDevices.getUserMedia(constraints);
+  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  const settings = stream.getAudioTracks()[0]?.getSettings() ?? {};
+  console.log('[microphone] stream acquired — applied settings:', JSON.stringify({
+    deviceId: settings.deviceId,
+    echoCancellation: settings.echoCancellation,
+    noiseSuppression: settings.noiseSuppression,
+    autoGainControl: settings.autoGainControl,
+    sampleRate: settings.sampleRate,
+    channelCount: settings.channelCount,
+  }));
+  return stream;
 }
