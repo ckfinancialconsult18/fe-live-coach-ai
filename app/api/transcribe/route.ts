@@ -11,7 +11,38 @@ interface DeepgramWord {
 // Models tried in order — nova-3 may not be on all plans.
 const DG_MODELS = ['nova-2', 'nova-2-general', 'nova', 'base'];
 
-async function callDeegramWithModel(
+interface DgAttempt {
+  model: string;
+  status: number; // 0 = network-level failure (fetch threw)
+  body: string;
+}
+
+// ── Container-format sniffing ────────────────────────────────────────────────
+// Every blob the current client produces is a complete file (WebM, Ogg, MP4 or
+// WAV) and therefore starts with a container magic number. A payload with no
+// recognizable header is a raw media segment — the signature of the old
+// timeslice-based recorder (stale client bundle). Deepgram can never decode
+// those, so we reject them with an exact diagnosis instead of burning four
+// doomed Deepgram calls per chunk.
+function sniffContainer(buf: ArrayBuffer): { format: string | null; magicHex: string } {
+  const b = new Uint8Array(buf.slice(0, 16));
+  const magicHex = Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join(' ');
+  if (b.length >= 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
+    return { format: 'webm (EBML)', magicHex };
+  }
+  if (b.length >= 4 && b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
+    return { format: 'ogg', magicHex };
+  }
+  if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    return { format: 'mp4/m4a', magicHex };
+  }
+  if (b.length >= 4 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) {
+    return { format: 'wav (RIFF)', magicHex };
+  }
+  return { format: null, magicHex };
+}
+
+async function callDeepgramWithModel(
   apiKey: string,
   model: string,
   audioBuffer: ArrayBuffer,
@@ -37,14 +68,27 @@ async function callDeegramWithModel(
 
     const dgText = await dgRes.text().catch(() => '');
 
-    console.log(`[transcribe][3] model=${model} → HTTP ${dgRes.status} | body preview: ${dgText.slice(0, 300)}`);
-
-    if (dgRes.ok) return { ok: true, dgText };
+    if (dgRes.ok) {
+      console.log(`[transcribe][3] model=${model} → HTTP ${dgRes.status} OK`);
+      return { ok: true, dgText };
+    }
+    // FULL error body — never truncated. This is the exact Deepgram error.
+    console.error(`[transcribe][3] model=${model} → HTTP ${dgRes.status} | FULL DEEPGRAM ERROR BODY:\n${dgText}`);
     return { ok: false, status: dgRes.status, body: dgText };
   } catch (err) {
     const stack = err instanceof Error ? err.stack ?? err.message : String(err);
     console.error(`[transcribe][3] model=${model} → fetch threw: ${stack}`);
     return { ok: false, status: 0, body: `fetch threw: ${stack}` };
+  }
+}
+
+/** Pull the human-readable message out of a Deepgram error body if it's JSON. */
+function extractDgMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { err_msg?: string; error?: string; message?: string; reason?: string };
+    return parsed.err_msg ?? parsed.error ?? parsed.message ?? parsed.reason ?? body;
+  } catch {
+    return body;
   }
 }
 
@@ -89,16 +133,42 @@ export async function POST(req: NextRequest) {
   // Normalize Content-Type: strip codec params (e.g. "audio/webm;codecs=opus" → "audio/webm")
   const rawContentType = req.headers.get('content-type') ?? 'audio/webm';
   const contentType = rawContentType.split(';')[0].trim();
+  const clientPipelineVersion = req.headers.get('x-pipeline-version') ?? 'unknown (old bundle — header absent)';
+  const chunkSeq = req.headers.get('x-chunk-seq') ?? '?';
+
+  // ── Step 2.5: verify the payload is a real container file ──────────────────
+  const { format, magicHex } = sniffContainer(audioBuffer);
   console.log('[transcribe][2] contentType raw:', rawContentType, '| normalized:', contentType,
-    '| bytes:', audioBuffer.byteLength);
+    '| bytes:', audioBuffer.byteLength,
+    '| container:', format ?? 'UNRECOGNIZED',
+    '| first bytes:', magicHex,
+    '| chunkSeq:', chunkSeq,
+    '| clientPipeline:', clientPipelineVersion);
+
+  if (!format) {
+    console.error('[transcribe][2] REJECTED (422): payload has NO container header — this is a raw ' +
+      'media segment produced by MediaRecorder.start(timeslice). The browser is running a stale ' +
+      'client bundle. Deepgram would return 400 "corrupt or unsupported data" for this payload. ' +
+      `First 16 bytes: ${magicHex} | clientPipeline: ${clientPipelineVersion}`);
+    return NextResponse.json(
+      {
+        error: 'Audio chunk has no container header (not WebM/Ogg/MP4/WAV). The browser sent a raw ' +
+          'media segment — the old timeslice-based recorder is still running. Hard-refresh the page ' +
+          '(Cmd/Ctrl+Shift+R) to load the current client bundle.',
+        firstBytesHex: magicHex,
+        clientPipelineVersion,
+      },
+      { status: 422 }
+    );
+  }
 
   // ── Step 3: try Deepgram models in order ────────────────────────────────────
-  let lastError = '';
+  const attempts: DgAttempt[] = [];
   for (const model of DG_MODELS) {
-    const result = await callDeegramWithModel(apiKey, model, audioBuffer, contentType);
+    const result = await callDeepgramWithModel(apiKey, model, audioBuffer, contentType);
 
     if (!result.ok) {
-      lastError = `model=${model} HTTP ${result.status}: ${result.body}`;
+      attempts.push({ model, status: result.status, body: result.body });
       // 401 = auth failure — no point trying other models
       if (result.status === 401) {
         console.error('[transcribe][3] auth failure from Deepgram — stopping model fallback');
@@ -118,9 +188,9 @@ export async function POST(req: NextRequest) {
       console.log('[transcribe][4] JSON parsed OK — model:', model);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[transcribe][4] JSON.parse threw:', msg, '| raw body:', result.dgText.slice(0, 300));
+      console.error('[transcribe][4] JSON.parse threw:', msg, '| FULL raw body:\n', result.dgText);
       return NextResponse.json(
-        { error: `Deepgram returned unparseable JSON (model=${model}): ${result.dgText.slice(0, 200)}` },
+        { error: `Deepgram returned unparseable JSON (model=${model}): ${result.dgText}` },
         { status: 502 }
       );
     }
@@ -129,7 +199,7 @@ export async function POST(req: NextRequest) {
     const alternative = data.results?.channels?.[0]?.alternatives?.[0];
     if (!alternative) {
       console.warn('[transcribe][5] no alternatives in Deepgram response — model:', model,
-        '| full body:', result.dgText.slice(0, 500));
+        '| FULL body:\n', result.dgText);
       return NextResponse.json({ transcript: '', words: [] });
     }
 
@@ -145,10 +215,32 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // All models exhausted
-  console.error('[transcribe][3] all models failed — last error:', lastError);
+  // ── All models exhausted: return the ACTUAL Deepgram error, not a generic 502
+  console.error(`[transcribe][3] ALL MODELS FAILED — ${attempts.length} attempt(s). Full error bodies:`);
+  for (const a of attempts) {
+    console.error(`[transcribe][3]   model=${a.model} HTTP ${a.status} FULL BODY:\n${a.body}`);
+  }
+
+  const primary = attempts[0];
+  // Pass Deepgram's real HTTP status through. 0 means our fetch to Deepgram
+  // failed at the network level — that (and only that) is a true 502.
+  const status = primary && primary.status >= 400 ? primary.status : 502;
+  let deepgramBody: unknown = primary?.body ?? '';
+  try { deepgramBody = JSON.parse(primary?.body ?? ''); } catch { /* keep raw string */ }
+
   return NextResponse.json(
-    { error: `Deepgram transcription failed after trying all models. Last error: ${lastError}` },
-    { status: 502 }
+    {
+      error: primary
+        ? `Deepgram error (model=${primary.model}, HTTP ${primary.status}): ${extractDgMessage(primary.body)}`
+        : 'Deepgram transcription failed with no recorded attempts.',
+      deepgramStatus: primary?.status ?? null,
+      deepgramBody,
+      attempts,
+      requestBytes: audioBuffer.byteLength,
+      contentType,
+      container: format,
+      clientPipelineVersion,
+    },
+    { status }
   );
 }
