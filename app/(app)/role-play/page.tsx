@@ -33,7 +33,6 @@ export default function RolePlayPage() {
     setPersona(p);
     setMessages([]);
     setScore(null);
-    const persona = PERSONAS.find((x) => x.id === p);
     const openings: Record<string, string> = {
       friendly:    'Hello? Yes this is Martha speaking.',
       busy:        'Yeah? Make it quick, I\'m in the middle of something.',
@@ -55,7 +54,7 @@ export default function RolePlayPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/coach', {
+      await fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

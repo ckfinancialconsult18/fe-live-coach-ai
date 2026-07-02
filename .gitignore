@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# extracted pipeline data — user call content, never commit
+/data/pipeline/

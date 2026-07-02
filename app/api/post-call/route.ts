@@ -4,6 +4,10 @@ import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
 import { createClient } from '@/lib/supabase/server';
 import type { TranscriptLine, TimelineEvent } from '@/lib/types';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 interface PostCallRequestBody {
   transcript: string;
   transcriptLines?: TranscriptLine[];

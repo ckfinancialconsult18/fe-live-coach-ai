@@ -5,6 +5,10 @@ import { COACH_SYSTEM_PROMPT, UNDERWRITING_EXTRACT_PROMPT, STAGE_DETECTION_PROMP
 import { requireUser } from '@/lib/api/guard';
 import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 const VALID_STAGES = ['introduction', 'permission', 'discovery', 'existing_coverage', 'health', 'budget', 'presentation', 'objections', 'close'];
 
 function buildChecklist(transcript: string): Record<string, boolean> {
@@ -35,7 +39,7 @@ export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
-  const { transcript, fullLength, memory } = await req.json() as { transcript: string; fullLength: number; memory?: Record<string, unknown> };
+  const { transcript, memory } = await req.json() as { transcript: string; memory?: Record<string, unknown> };
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
   const encoder = new TextEncoder();

@@ -7,6 +7,10 @@ import { normalizeText } from '@/lib/rag/chunk';
 import { extractInsightsFromDb } from '@/lib/rag/extract-insights';
 import type { PipelineJob } from '@/lib/pipeline/types';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 /**
  * Replaces the filesystem-backed /api/pipeline/upload + /api/pipeline/process
  * loop with a single synchronous-per-file pipeline: store → extract → normalize
@@ -15,6 +19,12 @@ import type { PipelineJob } from '@/lib/pipeline/types';
  * skipped — the model itself dedupes against the existing-knowledge index
  * passed into the prompt, per lib/rag/extract-insights.ts).
  */
+// Per-file cap — transcripts are text; anything larger is either not a
+// transcript or will blow the serverless memory/time budget in parseTranscript.
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB, matches the transcripts bucket limit
+const ALLOWED_EXTENSIONS = new Set(['txt', 'md', 'pdf', 'docx', 'vtt']);
+const MAX_FILES_PER_REQUEST = 10;
+
 export async function POST(request: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
@@ -23,6 +33,24 @@ export async function POST(request: NextRequest) {
   const files = formData.getAll('files').filter((f): f is File => f instanceof File);
   if (files.length === 0) {
     return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+  }
+  if (files.length > MAX_FILES_PER_REQUEST) {
+    return NextResponse.json({ error: `Too many files — upload at most ${MAX_FILES_PER_REQUEST} per request` }, { status: 400 });
+  }
+  for (const file of files) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { error: `"${file.name}" exceeds the ${MAX_UPLOAD_BYTES / 1024 / 1024}MB per-file limit` },
+        { status: 400 }
+      );
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return NextResponse.json(
+        { error: `"${file.name}" has unsupported type ".${ext}" — allowed: ${[...ALLOWED_EXTENSIONS].map((e) => '.' + e).join(', ')}` },
+        { status: 400 }
+      );
+    }
   }
 
   const jobs: PipelineJob[] = [];

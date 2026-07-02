@@ -28,6 +28,19 @@ function buildTestWav(): ArrayBuffer {
  * Visit /api/live-call-status in your browser for a full diagnostic report.
  */
 export async function GET() {
+  // Auth-gate the diagnostics: this endpoint reveals configuration state
+  // (which env vars are set, the Supabase URL, provider error bodies) and must
+  // not be readable by anonymous visitors.
+  try {
+    const supabaseGate = await createClient();
+    const { data: { user: gateUser } } = await supabaseGate.auth.getUser();
+    if (!gateUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const checks: Record<string, { ok: boolean; message: string }> = {};
 
   // 1. OPENAI_API_KEY present

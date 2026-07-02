@@ -5,6 +5,10 @@ import { parseTranscript, detectFormat } from '@/lib/pipeline/parser';
 import { normalizeText } from '@/lib/rag/chunk';
 import { logPipelineEvent } from '@/lib/monitoring/log';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 const ALLOWED_SOURCE_TYPES = [
   'carrier_guide', 'underwriting_manual', 'script', 'objection_handling',
   'closing_technique', 'compliance', 'product_doc', 'training', 'other',

@@ -59,7 +59,7 @@ const DEFAULT_CHECKLIST: ChecklistItem[] = [
   { id: 'close',            label: 'Asked for the sale',       checked: false },
 ];
 
-export function useAICoach(transcript: TranscriptLine[]) {
+export function useAICoach() {
   const [insight, setInsight] = useState<CoachInsight>(DEFAULT_INSIGHT);
   const [stage, setStage] = useState<CallStage>('introduction');
   const [underwriting, setUnderwriting] = useState<UnderwritingProfile>(DEFAULT_UNDERWRITING);

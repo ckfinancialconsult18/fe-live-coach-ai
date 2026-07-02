@@ -5,6 +5,10 @@ import { buildLearnPrompt } from '@/lib/learn-prompts';
 import { getOpenAI } from '@/lib/openai';
 import { requireUser } from '@/lib/api/guard';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 export const runtime = 'nodejs';
 
 const FILE_KEY_MAP: Record<string, KnowledgeKey> = {

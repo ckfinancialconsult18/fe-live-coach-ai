@@ -5,8 +5,6 @@ const TEAMS_HEADER = /^Microsoft Teams Meeting\s+Transcript/i;
 const MEET_HEADER = /^(Participants\s*\n|Google Meet\s+Transcript)/i;
 
 const ZOOM_LINE = /^(\d{2}:\d{2}:\d{2})\s+(.+?):\s+(.+)$/;
-const TEAMS_LINE = /^(.+?)\s{2,}(\d+:\d{2})\s*\n([\s\S]*?)(?=\n\S|\n$|$)/gm;
-const MEET_LINE = /^([A-Z][a-zA-Z\s]+?):\s*(.+)$/gm;
 const VTT_LINE = /^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/;
 
 export function detectFormat(filename: string): TranscriptFormat {

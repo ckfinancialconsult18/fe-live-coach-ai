@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 import { processEmbeddingQueue } from '@/lib/rag/process-queue';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 /**
  * User-triggered drain of their own embedding_queue — called immediately
  * after ingest from the client so newly uploaded documents become

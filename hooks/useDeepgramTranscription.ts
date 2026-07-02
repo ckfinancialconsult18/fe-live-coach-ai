@@ -32,7 +32,6 @@ export interface UseDeepgramTranscriptionReturn {
 const PIPELINE_VERSION = 'chunked-recorder-v3';
 
 const MAX_RECONNECT = 5;
-const RECONNECT_BASE_MS = 1000;
 // How long to record each chunk before stopping and POSTing.
 // Each stop+start produces a complete WebM file — Deepgram can decode every chunk.
 const CHUNK_INTERVAL_MS = 4000;

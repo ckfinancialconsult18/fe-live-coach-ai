@@ -87,9 +87,7 @@ export default function KnowledgeCenterPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadJobs();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPending();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadStats();
   }, [loadJobs, loadPending, loadStats]);
 
@@ -490,7 +488,7 @@ function ReviewTab({
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }, []);

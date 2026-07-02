@@ -3,6 +3,10 @@ import { openai } from '@/lib/openai';
 import { COACHING_RECOMMENDATIONS_PROMPT } from '@/lib/coach-prompts';
 import { requireUser } from '@/lib/api/guard';
 
+// Vercel function timeout — AI/provider calls in this route routinely exceed the
+// platform default (10-15s); without this the route 504s mid-generation.
+export const maxDuration = 60;
+
 const MIN_SCORED_CALLS = 3;
 
 export async function GET() {

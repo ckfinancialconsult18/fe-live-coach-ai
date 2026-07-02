@@ -58,7 +58,7 @@ export default function LiveCallPage() {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach();
 
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
