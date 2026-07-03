@@ -5,8 +5,10 @@ import {
   listAudioInputDevices,
   getMicPermissionState,
   requestMicrophoneStream,
+  DEFAULT_MIC_PROCESSING,
   type AudioInputDevice,
   type MicPermissionState,
+  type MicProcessingOptions,
 } from '@/lib/audio/devices';
 import { createLevelMeter, type LevelMeter } from '@/lib/audio/level-meter';
 
@@ -21,7 +23,7 @@ export interface UseMicrophoneReturn {
   level: number; // 0-1, polled
   stream: MediaStream | null;
   audioContext: AudioContext | null;
-  start: () => Promise<MediaStream | null>;
+  start: (opts?: { processing?: MicProcessingOptions }) => Promise<MediaStream | null>;
   stop: () => void;
   error: string | null;
 }
@@ -40,6 +42,9 @@ export function useMicrophone(): UseMicrophoneReturn {
 
   const streamRef = useRef<MediaStream | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
+  // Processing config chosen by the active capture mode — remembered so a
+  // mid-call device switch re-acquires with the same constraints.
+  const processingRef = useRef<MicProcessingOptions>(DEFAULT_MIC_PROCESSING);
   const meterRef = useRef<LevelMeter | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSignalAtRef = useRef<number>(0);
@@ -86,7 +91,7 @@ export function useMicrophone(): UseMicrophoneReturn {
   const acquire = useCallback(async (deviceId?: string): Promise<MediaStream | null> => {
     setError(null);
     try {
-      const newStream = await requestMicrophoneStream(deviceId);
+      const newStream = await requestMicrophoneStream(deviceId, processingRef.current);
       setPermissionState('granted');
 
       // Stop the previous stream only after the new one succeeds, so a
@@ -144,7 +149,10 @@ export function useMicrophone(): UseMicrophoneReturn {
     }
   }, [refreshDevices]);
 
-  const start = useCallback(() => acquire(selectedDeviceId ?? undefined), [acquire, selectedDeviceId]);
+  const start = useCallback((opts?: { processing?: MicProcessingOptions }) => {
+    if (opts?.processing) processingRef.current = opts.processing;
+    return acquire(selectedDeviceId ?? undefined);
+  }, [acquire, selectedDeviceId]);
 
   const selectDevice = useCallback(async (deviceId: string) => {
     setSelectedDeviceId(deviceId);

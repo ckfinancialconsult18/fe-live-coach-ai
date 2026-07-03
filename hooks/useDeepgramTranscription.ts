@@ -133,11 +133,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const reconnectAttemptRef = useRef(0);
   const micRef = useRef(mic);
   const usingWebSpeechRef = useRef(false);
-  // Combined stream (mic + system audio) used for recording
-  const combinedStreamRef = useRef<MediaStream | null>(null);
-  // AudioContext that mixes mic + system audio (must be closed on stop)
-  const mergeCtxRef = useRef<AudioContext | null>(null);
-  // The base stream chosen at startListening — fallback if micRef state is stale
+  // The stream being recorded — the AudioInputManager's mixed output, set at
+  // startListening. Source acquisition/mixing lives in lib/audio/input-manager.ts.
   const recordStreamRef = useRef<MediaStream | null>(null);
   // Level monitoring on the exact stream being recorded
   const monitorCtxRef = useRef<AudioContext | null>(null);
@@ -295,9 +292,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const startChunkCycle = useCallback(() => {
     if (!shouldReconnectRef.current || usingWebSpeechRef.current) return;
 
-    // Prefer combined stream (mic + system audio); fall back to mic-only.
-    // recordStreamRef covers the first cycle when React state hasn't flushed yet.
-    const stream = combinedStreamRef.current ?? micRef.current.stream ?? recordStreamRef.current;
+    // The mode's mixed stream (set at startListening) is the record target;
+    // the raw mic stream is only a legacy fallback.
+    const stream = recordStreamRef.current ?? micRef.current.stream;
     if (!stream) {
       console.error('[transcription] no audio stream available');
       setConnectionState('failed');
@@ -416,32 +413,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   useEffect(() => { startChunkCycleRef.current = startChunkCycle; }, [startChunkCycle]);
 
-  // ── Request system audio (to capture speaker output / remote call) ──────────
-  // getUserMedia only captures the microphone. When the remote party speaks
-  // through the computer's speakers, that audio is NOT in the mic stream.
-  // getDisplayMedia with audio:true captures the system audio (loopback).
-  // We merge both tracks into a single stream so Deepgram hears both sides.
-
-  const acquireSystemAudio = useCallback(async (): Promise<MediaStream | null> => {
-    if (typeof navigator?.mediaDevices?.getDisplayMedia !== 'function') return null;
-    try {
-      const display = await navigator.mediaDevices.getDisplayMedia({
-        video: true, // required by most browsers to trigger the picker
-        audio: true,
-      });
-      // Stop the video track immediately — we only want audio
-      display.getVideoTracks().forEach((t) => t.stop());
-      const audioTracks = display.getAudioTracks();
-      console.log('[transcription] system audio tracks:', audioTracks.length,
-        '| labels:', audioTracks.map((t) => t.label).join(', '));
-      return audioTracks.length > 0 ? display : null;
-    } catch (err) {
-      // User cancelled the picker or browser doesn't allow audio-only getDisplayMedia
-      console.warn('[transcription] getDisplayMedia cancelled or unavailable:', err instanceof Error ? err.message : err);
-      return null;
-    }
-  }, []);
-
   // ── Level monitor + heartbeat ───────────────────────────────────────────────
   // Samples the RMS of the exact stream being recorded every second, and logs
   // recorder state + every track's readyState/enabled/muted. This is the
@@ -469,7 +440,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         if (peak > w.peak) w.peak = peak;
       }
       const rec = recorderRef.current;
-      const stream = combinedStreamRef.current ?? micRef.current.stream ?? recordStreamRef.current;
+      const stream = recordStreamRef.current ?? micRef.current.stream;
       const states = stream?.getAudioTracks()
         .map((t, i) => `[${i}] ${t.readyState}/${t.enabled ? 'enabled' : 'DISABLED'}/${t.muted ? 'MUTED' : 'unmuted'}`)
         .join(' ') ?? 'no stream';
@@ -497,70 +468,32 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     setConnectionState('connecting');
     setError(null);
 
-    // The caller can pass the stream directly (page calls mic.start() right
-    // before this) — React state in micRef may not have flushed yet.
-    const micStream = micRef.current.stream ?? explicitStream ?? null;
-    if (!micStream) {
+    // Source acquisition and mixing (mic-only, mic + system audio, telephony
+    // providers, …) is the AudioInputManager's job — see lib/audio/input-manager.ts
+    // and hooks/useAudioInput.ts. This hook records whatever single stream it
+    // is handed; the explicit stream (the mode's mixed output) takes priority,
+    // with the raw mic stream as the legacy fallback.
+    const recordStream = explicitStream ?? micRef.current.stream ?? null;
+    if (!recordStream) {
       setError('Microphone is not active — cannot start transcription.');
       setConnectionState('failed');
       return;
     }
-    recordStreamRef.current = micStream;
-    micStream.getAudioTracks().forEach((t, i) => {
-      console.log(`[transcription] mic track[${i}] ${trackInfo(t)}`);
+    recordStreamRef.current = recordStream;
+    recordStream.getAudioTracks().forEach((t, i) => {
+      console.log(`[transcription] record track[${i}] ${trackInfo(t)}`);
       if (!diagnosedTracksRef.current.has(t)) {
         diagnosedTracksRef.current.add(t);
-        attachTrackDiagnostics(t, `mic track[${i}]`);
+        attachTrackDiagnostics(t, `record track[${i}]`);
       }
     });
 
-    // Try to acquire system audio to capture the remote party's voice through speakers.
-    // This is optional — if the user declines or the browser doesn't support it,
-    // we fall back to mic-only.
-    const systemAudio = await acquireSystemAudio();
-
-    if (systemAudio) {
-      systemAudio.getAudioTracks().forEach((t, i) => {
-        if (!diagnosedTracksRef.current.has(t)) {
-          diagnosedTracksRef.current.add(t);
-          attachTrackDiagnostics(t, `system-audio track[${i}]`);
-        }
-      });
-      // Merge mic + system audio into a single stream
-      const ctx = new AudioContext();
-      mergeCtxRef.current = ctx;
-      // A suspended AudioContext outputs SILENCE — resume before recording.
-      if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (err) {
-          console.error('[transcription] merge AudioContext resume() failed:', err);
-        }
-      }
-      ctx.onstatechange = () => {
-        console.warn(`[transcription] merge AudioContext state → ${ctx.state}` +
-          (ctx.state !== 'running' ? ' — merged stream is SILENT until it is running again' : ''));
-      };
-      const dest = ctx.createMediaStreamDestination();
-      const micSource = ctx.createMediaStreamSource(micStream);
-      const sysSource = ctx.createMediaStreamSource(systemAudio);
-      micSource.connect(dest);
-      sysSource.connect(dest);
-      combinedStreamRef.current = dest.stream;
-      console.log('[transcription] merged mic + system audio — combined tracks:',
-        dest.stream.getAudioTracks().length, '| merge AudioContext state:', ctx.state);
-    } else {
-      // Mic-only mode — remote call audio through speakers is only picked up
-      // acoustically by the microphone (audio processing is disabled in
-      // requestMicrophoneStream precisely so this works).
-      combinedStreamRef.current = null;
-      console.log('[transcription] mic-only mode (system audio not available)');
-    }
-
-    await startMonitoring(combinedStreamRef.current ?? micStream);
+    await startMonitoring(recordStream);
 
     setConnectionState('connected');
     setTranscriptionMode('deepgram');
     startChunkCycleRef.current();
-  }, [acquireSystemAudio, startMonitoring]);
+  }, [startMonitoring]);
 
   // ── Public stopListening ────────────────────────────────────────────────────
 
@@ -588,16 +521,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       try { speechRef.current.abort(); } catch { /* ignore */ }
       speechRef.current = null;
     }
-    // Clean up combined stream (system audio tracks) and the mixing context
-    if (combinedStreamRef.current) {
-      combinedStreamRef.current.getTracks().forEach((t) => t.stop());
-      combinedStreamRef.current = null;
-    }
-    if (mergeCtxRef.current && mergeCtxRef.current.state !== 'closed') {
-      mergeCtxRef.current.onstatechange = null;
-      mergeCtxRef.current.close().catch(() => {});
-    }
-    mergeCtxRef.current = null;
+    // The record stream (and any system-audio/provider tracks inside it) is
+    // owned by the AudioInputManager session — useAudioInput.stop() tears it
+    // down. We only drop our reference here.
     recordStreamRef.current = null;
     setConnectionState('idle');
     setPartial(null);

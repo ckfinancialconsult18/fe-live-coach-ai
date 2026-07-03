@@ -10,10 +10,12 @@ import { LiveReminders } from '@/components/live-call/LiveReminders';
 import { QuickObjectionBar } from '@/components/live-call/QuickObjectionBar';
 import { CallMetricsBar } from '@/components/live-call/CallMetricsBar';
 import { MicrophoneControls } from '@/components/live-call/MicrophoneControls';
+import { AudioModeSelector } from '@/components/live-call/AudioModeSelector';
 import { MidCallMemoryPanel } from '@/components/live-call/MidCallMemoryPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
 import { useMicrophone } from '@/hooks/useMicrophone';
+import { useAudioInput } from '@/hooks/useAudioInput';
 import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
@@ -54,6 +56,7 @@ function PreflightPanel({ result, onDismiss }: { result: PreflightResult; onDism
 
 export default function LiveCallPage() {
   const mic = useMicrophone();
+  const audioInput = useAudioInput(mic);
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
@@ -249,10 +252,13 @@ export default function LiveCallPage() {
     setTimeline([]);
     setMomentum(0);
 
-    const stream = await mic.start();
+    // The AudioInputManager acquires the mic (with the selected mode's
+    // processing constraints) plus any other sources the mode wants (system
+    // audio, telephony providers), and returns one mixed stream to record.
+    const stream = await audioInput.start();
     if (!stream) return; // mic.error already surfaces a real error to the UI
 
-    // Pass the stream directly — mic.stream React state may not have flushed yet.
+    // Pass the stream directly — React state may not have flushed yet.
     await startListening(stream);
     await autosave.startCall();
 
@@ -262,7 +268,7 @@ export default function LiveCallPage() {
     }, 1000);
     timelineEventId = 0;
     setTimeline([{ id: 'tl-greeting', timestampSec: 0, category: 'greeting', label: 'Call started', transcriptLineId: null }]);
-  }, [mic, startListening, clearTranscript, autosave]);
+  }, [audioInput, startListening, clearTranscript, autosave]);
 
   const endCall = useCallback(async () => {
     console.log('[endCall] button clicked');
@@ -285,6 +291,9 @@ export default function LiveCallPage() {
     // We catch individually so the fetch below always executes.
     try { stopListening(); console.log('[endCall] stopListening OK'); }
     catch (e) { console.error('[endCall] stopListening threw:', e); }
+
+    try { audioInput.stop(); console.log('[endCall] audioInput.stop OK'); }
+    catch (e) { console.error('[endCall] audioInput.stop threw:', e); }
 
     try { mic.stop(); console.log('[endCall] mic.stop OK'); }
     catch (e) { console.error('[endCall] mic.stop threw:', e); }
@@ -378,7 +387,7 @@ export default function LiveCallPage() {
     } finally {
       setLoadingReport(false);
     }
-  }, [stopListening, mic, transcript, duration, metrics, autosave, timeline]);
+  }, [stopListening, audioInput, mic, transcript, duration, metrics, autosave, timeline]);
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -395,7 +404,10 @@ export default function LiveCallPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Mic controls bar */}
       <div className="flex items-center justify-between gap-3 px-5 py-2 border-b border-white/6 shrink-0">
-        <MicrophoneControls mic={mic} connectionState={connectionState} transcriptionMode={transcriptionMode} />
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
+          <AudioModeSelector audioInput={audioInput} />
+          <MicrophoneControls mic={mic} connectionState={connectionState} transcriptionMode={transcriptionMode} />
+        </div>
         {autosave.callId && (
           <span className="text-[10px] text-slate-600 shrink-0">
             {autosave.lastSavedAt ? `Autosaved ${autosave.lastSavedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}` : 'Autosave starting…'}

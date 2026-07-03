@@ -30,26 +30,40 @@ export async function getMicPermissionState(): Promise<MicPermissionState> {
   }
 }
 
+export interface MicProcessingOptions {
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+}
+
 /**
- * Requests a microphone stream tuned for this app's core use case: a laptop
- * mic picking up BOTH the agent's voice AND the phone call playing through the
- * computer's speakers.
+ * Default processing for acoustic pickup (a laptop mic hearing BOTH the
+ * agent's voice AND a phone call playing through the computer's speakers):
+ * echoCancellation and noiseSuppression MUST be off — the echo canceller
+ * treats speaker output as echo and erases the remote party's voice, and its
+ * half-duplex ducking suppresses the mic while speaker audio plays;
+ * noiseSuppression similarly attenuates far-field speech.
  *
- * echoCancellation and noiseSuppression MUST be off here. The echo canceller
- * treats any audio coming out of the speakers as echo and subtracts it from
- * the mic signal — it erases the remote party's voice entirely — and its
- * half-duplex ducking suppresses the mic while speaker audio plays, so during
- * a call almost nothing survives. noiseSuppression similarly attenuates
- * far-field speaker audio. autoGainControl stays on: it boosts quiet distant
- * audio and cancels nothing.
+ * Capture modes override this per-mode (see lib/audio/input-manager.ts):
+ * a close-talking headset mic wants processing ON, since the remote party
+ * arrives digitally and there is nothing acoustic to erase.
  */
-export async function requestMicrophoneStream(deviceId?: string): Promise<MediaStream> {
+export const DEFAULT_MIC_PROCESSING: MicProcessingOptions = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: true,
+};
+
+export async function requestMicrophoneStream(
+  deviceId?: string,
+  processing: MicProcessingOptions = DEFAULT_MIC_PROCESSING,
+): Promise<MediaStream> {
   const constraints: MediaStreamConstraints = {
     audio: {
       deviceId: deviceId ? { exact: deviceId } : undefined,
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: true,
+      echoCancellation: processing.echoCancellation,
+      noiseSuppression: processing.noiseSuppression,
+      autoGainControl: processing.autoGainControl,
       channelCount: 1,
     },
     video: false,
