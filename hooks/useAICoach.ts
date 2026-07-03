@@ -82,8 +82,8 @@ export function useAICoach(transcript: TranscriptLine[]) {
   }, [memory]);
 
   const liveScores: LiveSalesScores = useMemo(
-    () => computeLiveScores(insight, checklist, stage),
-    [insight, checklist, stage],
+    () => computeLiveScores(insight, checklist, stage, transcript),
+    [insight, checklist, stage, transcript],
   );
 
   const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
