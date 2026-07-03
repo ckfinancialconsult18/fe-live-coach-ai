@@ -271,6 +271,31 @@ export interface WeightedScoreBreakdown {
   reasoning: string;        // deeper reasoning from AI
 }
 
+// ── Conversation Analysis (Feature 2) ────────────────────────────────────────
+export interface ConversationTurn {
+  speaker: 'agent' | 'prospect';
+  words: number;
+  isQuestion: boolean;
+}
+
+export interface ConversationAnalysis {
+  agentWords: number;
+  prospectWords: number;
+  agentTurnCount: number;
+  prospectTurnCount: number;
+  agentAvgWordsPerTurn: number;
+  prospectAvgWordsPerTurn: number;
+  agentLongestTurn: number;
+  prospectLongestTurn: number;
+  agentQuestionCount: number;
+  prospectQuestionCount: number;
+  agentTalkPct: number;
+  prospectTalkPct: number;
+  /** Ideal is <= 60% for agent (listen more than talk) */
+  talkRatioAssessment: 'excellent' | 'good' | 'high' | 'very_high';
+  turns: ConversationTurn[];
+}
+
 // ── Phase 3: AI Quality Score (12-dimension radar) ──────────────────────────
 export interface QualityScores {
   confidence: number;
@@ -325,6 +350,8 @@ export interface PostCallReport {
   improvementPlan: string[];
   /** Server-computed weighted score breakdown (Feature 1). Present when AI scoring succeeds. */
   weightedBreakdown?: WeightedScoreBreakdown;
+  /** Server-computed conversation analysis (Feature 2). */
+  conversationAnalysis?: ConversationAnalysis;
 }
 
 // ── CRM types ─────────────────────────────────────────────────────────────────

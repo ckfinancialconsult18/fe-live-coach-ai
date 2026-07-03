@@ -10,6 +10,7 @@ import {
   type TimelineEvent,
   type WeightedScoreBreakdown,
   type WeightedScoreCategory,
+  type ConversationAnalysis,
 } from '@/lib/types';
 
 function computeWeightedScore(
@@ -58,12 +59,54 @@ interface PostCallRequestBody {
 }
 
 function computeRealMetrics(lines: TranscriptLine[]) {
-  const agentWords = lines.filter((l) => l.speaker === 'agent').reduce((s, l) => s + l.text.split(/\s+/).length, 0);
-  const prospectWords = lines.filter((l) => l.speaker === 'prospect').reduce((s, l) => s + l.text.split(/\s+/).length, 0);
+  const agentLines = lines.filter((l) => l.speaker === 'agent');
+  const prospectLines = lines.filter((l) => l.speaker === 'prospect');
+
+  const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+  const agentWords = agentLines.reduce((s, l) => s + wordCount(l.text), 0);
+  const prospectWords = prospectLines.reduce((s, l) => s + wordCount(l.text), 0);
   const total = agentWords + prospectWords;
   const talkPct = total > 0 ? Math.round((agentWords / total) * 100) : 0;
-  const questionsAskedCount = lines.filter((l) => l.speaker === 'agent' && l.text.includes('?')).length;
-  return { talkPct, listenPct: 100 - talkPct, questionsAskedCount };
+  const questionsAskedCount = agentLines.filter((l) => l.text.includes('?')).length;
+
+  // Conversation analysis
+  const agentTurnCount = agentLines.length;
+  const prospectTurnCount = prospectLines.length;
+  const agentAvgWordsPerTurn = agentTurnCount > 0 ? Math.round(agentWords / agentTurnCount) : 0;
+  const prospectAvgWordsPerTurn = prospectTurnCount > 0 ? Math.round(prospectWords / prospectTurnCount) : 0;
+  const agentLongestTurn = agentLines.reduce((mx, l) => Math.max(mx, wordCount(l.text)), 0);
+  const prospectLongestTurn = prospectLines.reduce((mx, l) => Math.max(mx, wordCount(l.text)), 0);
+  const prospectQuestionCount = prospectLines.filter((l) => l.text.includes('?')).length;
+
+  let talkRatioAssessment: ConversationAnalysis['talkRatioAssessment'] = 'excellent';
+  if (talkPct > 75) talkRatioAssessment = 'very_high';
+  else if (talkPct > 65) talkRatioAssessment = 'high';
+  else if (talkPct > 55) talkRatioAssessment = 'good';
+
+  const conversationAnalysis: ConversationAnalysis = {
+    agentWords,
+    prospectWords,
+    agentTurnCount,
+    prospectTurnCount,
+    agentAvgWordsPerTurn,
+    prospectAvgWordsPerTurn,
+    agentLongestTurn,
+    prospectLongestTurn,
+    agentQuestionCount: questionsAskedCount,
+    prospectQuestionCount,
+    agentTalkPct: talkPct,
+    prospectTalkPct: 100 - talkPct,
+    talkRatioAssessment,
+    // Sample up to 40 turns for the visual bar chart
+    turns: lines.slice(0, 40).map((l) => ({
+      speaker: l.speaker as 'agent' | 'prospect',
+      words: wordCount(l.text),
+      isQuestion: l.text.includes('?'),
+    })),
+  };
+
+  return { talkPct, listenPct: 100 - talkPct, questionsAskedCount, conversationAnalysis };
 }
 
 /**
@@ -186,6 +229,7 @@ async function persistScore(
       threeBiggestStrengths: report.threeBiggestStrengths ?? [],
       overallGrade: report.overallGrade ?? '',
       weightedBreakdown: report.weightedBreakdown ?? null,
+      conversationAnalysis: report.conversationAnalysis ?? null,
     },
     strengths: report.strengths ?? [],
     missed_opportunities: report.missedOpportunities ?? [],
@@ -244,7 +288,7 @@ export async function POST(req: NextRequest) {
 
   const realMetrics = body.transcriptLines?.length
     ? computeRealMetrics(body.transcriptLines)
-    : { talkPct: 0, listenPct: 0, questionsAskedCount: 0 };
+    : { talkPct: 0, listenPct: 0, questionsAskedCount: 0, conversationAnalysis: undefined };
 
   console.log('[post-call][0] computed metrics — talkPct:', realMetrics.talkPct,
     '| listenPct:', realMetrics.listenPct,
@@ -307,6 +351,7 @@ export async function POST(req: NextRequest) {
   report.talkPct = realMetrics.talkPct;
   report.listenPct = realMetrics.listenPct;
   report.questionsAskedCount = realMetrics.questionsAskedCount;
+  report.conversationAnalysis = realMetrics.conversationAnalysis;
 
   // Server-side weighted score — overrides any overallScore the AI may have returned
   const weightedBreakdown = computeWeightedScore(

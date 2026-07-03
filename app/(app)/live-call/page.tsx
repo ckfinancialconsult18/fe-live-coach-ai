@@ -707,6 +707,80 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
               </div>
             )}
 
+            {/* ── Conversation Analysis ────────────────────────────────────── */}
+            {report.conversationAnalysis && (
+              <div className="glass-card rounded-2xl p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-slate-200">Conversation Analysis</h3>
+
+                {/* Talk/Listen split bar */}
+                <div>
+                  <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                    <span>Agent <span className="text-blue-400 font-bold">{report.conversationAnalysis.agentTalkPct}%</span></span>
+                    <span className={
+                      report.conversationAnalysis.talkRatioAssessment === 'excellent' ? 'text-green-400' :
+                      report.conversationAnalysis.talkRatioAssessment === 'good' ? 'text-amber-400' : 'text-red-400'
+                    }>
+                      {report.conversationAnalysis.talkRatioAssessment === 'excellent' ? '✓ Ideal ratio' :
+                       report.conversationAnalysis.talkRatioAssessment === 'good' ? '~ Slightly high' :
+                       report.conversationAnalysis.talkRatioAssessment === 'high' ? '⚠ Too much talking' : '⛔ Way too much talking'}
+                    </span>
+                    <span>Prospect <span className="text-purple-400 font-bold">{report.conversationAnalysis.prospectTalkPct}%</span></span>
+                  </div>
+                  <div className="h-3 rounded-full overflow-hidden flex">
+                    <div className="h-full bg-blue-500/70" style={{ width: `${report.conversationAnalysis.agentTalkPct}%` }} />
+                    <div className="h-full bg-purple-500/70 flex-1" />
+                  </div>
+                </div>
+
+                {/* Stats grid */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Agent Words', value: report.conversationAnalysis.agentWords.toLocaleString(), color: '#60a5fa' },
+                    { label: 'Prospect Words', value: report.conversationAnalysis.prospectWords.toLocaleString(), color: '#c084fc' },
+                    { label: 'Agent Questions', value: String(report.conversationAnalysis.agentQuestionCount), color: '#D4AF37' },
+                    { label: 'Agent Turns', value: String(report.conversationAnalysis.agentTurnCount), color: '#60a5fa' },
+                    { label: 'Avg Words/Turn', value: String(report.conversationAnalysis.agentAvgWordsPerTurn), color: '#60a5fa' },
+                    { label: 'Longest Monologue', value: `${report.conversationAnalysis.agentLongestTurn}w`, color: report.conversationAnalysis.agentLongestTurn > 100 ? '#ef4444' : '#94a3b8' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-white/4 rounded-xl p-3 text-center">
+                      <p className="text-sm font-bold" style={{ color }}>{value}</p>
+                      <p className="text-[10px] text-slate-600 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Turn-by-turn bar chart */}
+                {report.conversationAnalysis.turns.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-slate-600 mb-1.5">Turn-by-turn word count</p>
+                    <div className="flex items-end gap-0.5 h-12">
+                      {report.conversationAnalysis.turns.map((turn, i) => {
+                        const maxWords = Math.max(...report.conversationAnalysis!.turns.map((t) => t.words), 1);
+                        const heightPct = Math.max(8, Math.round((turn.words / maxWords) * 100));
+                        return (
+                          <div
+                            key={i}
+                            title={`${turn.speaker}: ${turn.words} words${turn.isQuestion ? ' (?)' : ''}`}
+                            className="flex-1 rounded-t-sm min-w-[2px]"
+                            style={{
+                              height: `${heightPct}%`,
+                              background: turn.speaker === 'agent' ? '#3b82f680' : '#a855f780',
+                              outline: turn.isQuestion ? '1px solid #D4AF37' : 'none',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-4 mt-1.5 text-[10px] text-slate-600">
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500/70 inline-block" /> Agent</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-500/70 inline-block" /> Prospect</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm border border-[#D4AF37] inline-block" /> Question</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               {/* Quality Radar — guarded: qualityScores may be empty object when AI unavailable */}
               <div className="glass-card rounded-2xl p-5 flex flex-col items-center xl:col-span-1">
