@@ -482,7 +482,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       const states = stream?.getAudioTracks()
         .map((t, i) => `[${i}] ${t.readyState}/${t.enabled ? 'on' : 'OFF'}/${t.muted ? 'MUTED' : 'ok'}`)
         .join(' ') ?? 'no stream';
-      console.log(`[transcription] ♥ recorder=${rec?.state ?? 'none'} rms=${rms.toFixed(4)} peak=${peak.toFixed(4)} | ${states}`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[transcription] ♥ recorder=${rec?.state ?? 'none'} rms=${rms.toFixed(4)} peak=${peak.toFixed(4)} | ${states}`);
+      }
     }, 1000);
   }, []);
 

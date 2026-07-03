@@ -27,6 +27,7 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2500);
   }
 
+
   return (
     <div className="max-w-5xl space-y-6">
       {/* Tab nav */}
@@ -58,7 +59,7 @@ export default function SettingsPage() {
             <div>
               <p className="font-semibold text-slate-200">Your Profile</p>
               <p className="text-sm text-slate-500">Update your information below</p>
-              <button className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors">Change photo</button>
+              <button disabled className="mt-2 text-xs text-slate-600 cursor-not-allowed">Change photo (coming soon)</button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -77,7 +78,7 @@ export default function SettingsPage() {
             <Textarea label="Bio" rows={3} defaultValue="Life insurance agent specializing in Final Expense and Mortgage Protection coverage." />
           </div>
           <div className="flex justify-end gap-3">
-            {saved && <p className="text-sm text-green-400 self-center">✅ Changes saved!</p>}
+            {saved && <p className="text-sm text-amber-400 self-center">Saved locally — server sync coming soon</p>}
             <Button onClick={handleSave}>{saved ? 'Saved' : 'Save Changes'}</Button>
           </div>
         </div>
@@ -98,7 +99,7 @@ export default function SettingsPage() {
             <Input label="State" defaultValue="" placeholder="State" />
           </div>
           <div className="flex justify-end gap-3">
-            {saved && <p className="text-sm text-green-400 self-center">✅ Changes saved!</p>}
+            {saved && <p className="text-sm text-amber-400 self-center">Saved locally — server sync coming soon</p>}
             <Button onClick={handleSave}>{saved ? 'Saved' : 'Save Changes'}</Button>
           </div>
         </div>
@@ -148,7 +149,7 @@ export default function SettingsPage() {
               </div>
               {integration.connected
                 ? <Badge variant="success">Connected</Badge>
-                : <Button size="sm" variant="secondary">Connect</Button>
+                : <Button size="sm" variant="secondary" disabled>Connect</Button>
               }
             </div>
           ))}
@@ -160,7 +161,7 @@ export default function SettingsPage() {
         <div className="glass-card rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-100">Users & Roles</h2>
-            <Button size="sm" icon={<PlusIcon />}>Invite User</Button>
+            <Button size="sm" icon={<PlusIcon />} disabled>Invite User</Button>
           </div>
           <div className="space-y-3">
             {mockUsers.map((user) => (
@@ -178,7 +179,7 @@ export default function SettingsPage() {
                 <Badge variant={user.status === 'active' ? 'success' : 'default'}>
                   {user.status}
                 </Badge>
-                <button className="text-slate-600 hover:text-slate-400 transition-colors text-xs">Edit</button>
+                <button disabled className="text-slate-700 cursor-not-allowed text-xs">Edit</button>
               </div>
             ))}
           </div>
