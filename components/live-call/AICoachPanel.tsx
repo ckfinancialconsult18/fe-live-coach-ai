@@ -143,6 +143,31 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
           </div>
         )}
 
+        {/* Missed Questions — overdue items the agent hasn't asked yet */}
+        {insight.missedQuestions.length > 0 && (
+          <div className="glass-card rounded-xl p-3 space-y-2" style={{ border: '1px solid rgba(239,68,68,0.15)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-red-400">⚠ Missed Questions</p>
+            <div className="space-y-1">
+              {insight.missedQuestions.map((q, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-[10px] text-red-400 mt-0.5 shrink-0">!</span>
+                  <p className="text-[11px] text-slate-300 leading-snug">{q}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Family References — prospect mentioned family this turn */}
+        {insight.familyReferences.length > 0 && (
+          <div className="glass-card rounded-xl p-3 space-y-1.5" style={{ border: '1px solid rgba(34,197,94,0.15)' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-green-400">Family Mentioned</p>
+            {insight.familyReferences.map((ref, i) => (
+              <p key={i} className="text-[11px] text-slate-200 italic">&ldquo;{ref}&rdquo;</p>
+            ))}
+          </div>
+        )}
+
         {/* Buying Signal Engine */}
         <BuyingSignalEnginePanel signals={insight.buyingSignalDetails} />
 
