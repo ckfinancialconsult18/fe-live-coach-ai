@@ -11,8 +11,14 @@ interface Props {
   isAnalyzing: boolean;
 }
 
+const OBJECTION_CONFIDENCE_THRESHOLD = 55;
+
 export function AICoachPanel({ insight, isAnalyzing }: Props) {
-  const objectionQuote = insight.objectionAnalysis?.quote ?? insight.detectedObjection;
+  // Filter out low-confidence objections to avoid false positives
+  const activeObjection = insight.objectionAnalysis && insight.objectionAnalysis.confidence >= OBJECTION_CONFIDENCE_THRESHOLD
+    ? insight.objectionAnalysis
+    : null;
+  const objectionQuote = activeObjection?.quote ?? insight.detectedObjection;
 
   // Track the previously-rendered objection quote to detect a change, using
   // React's documented "adjust state during render" pattern rather than an
@@ -28,7 +34,7 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
 
   // Fallback alert (used only when the model returns a buying_signal /
   // opportunity flag without a full structured objectionAnalysis).
-  const simpleAlert = !insight.objectionAnalysis && insight.detectedObjection
+  const simpleAlert = !activeObjection && insight.detectedObjection
     ? insight.objectType === 'buying_signal'
       ? { bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)', text: '#22c55e', icon: '🟢', label: 'Buying Signal Detected' }
       : insight.objectType === 'opportunity'
@@ -56,9 +62,9 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {/* Objection Engine */}
-        {insight.objectionAnalysis && (
-          <ObjectionEnginePanel objection={insight.objectionAnalysis} isNew={objectionIsNew} />
+        {/* Objection Engine — only shown when confidence >= threshold */}
+        {activeObjection && (
+          <ObjectionEnginePanel objection={activeObjection} isNew={objectionIsNew} />
         )}
 
         {/* Fallback simple alert (buying_signal / opportunity flag with no structured objection) */}
@@ -110,7 +116,7 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
         )}
 
         {/* Recommended Response (only when no structured objection already shows one) */}
-        {!insight.objectionAnalysis && (
+        {!activeObjection && (
           <div className="glass-card rounded-xl p-3 space-y-2">
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Recommended Response</p>
             <p className="text-sm text-slate-200 leading-relaxed">{insight.recommendedResponse}</p>
@@ -123,7 +129,7 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
         )}
 
         {/* Alternatives */}
-        {!insight.objectionAnalysis && insight.alternativeResponses.length > 0 && (
+        {!activeObjection && insight.alternativeResponses.length > 0 && (
           <div className="glass-card rounded-xl p-3 space-y-2">
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Alternative Responses</p>
             <div className="space-y-2">

@@ -8,13 +8,21 @@ interface Props {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  already_insured: 'Already Insured',
-  think_about_it: 'Need to Think About It',
   too_expensive: 'Too Expensive',
-  call_later: 'Call Me Later',
+  need_to_think: 'Need to Think About It',
+  think_about_it: 'Need to Think About It',
   need_spouse: 'Need to Ask Spouse',
-  need_children: 'Need to Ask Children',
+  already_insured: 'Already Insured',
+  call_later: 'Call Me Later',
   not_interested: 'Not Interested',
+  busy: 'Too Busy Right Now',
+  send_information: 'Just Send Information',
+  young_healthy: 'Young / Healthy Enough',
+  children_will_pay: 'Children Will Pay',
+  government_will_pay: 'Government / Medicare Will Pay',
+  funeral_prepaid: 'Funeral Already Arranged',
+  need_children: 'Need to Ask Children',
+  other_objection: 'Other Objection',
 };
 
 export function ObjectionEnginePanel({ objection, isNew }: Props) {
