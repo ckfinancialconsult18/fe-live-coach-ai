@@ -36,13 +36,13 @@ export default async function ReportsPage() {
     '| scores rows:', scores?.length ?? 0);
 
   if (calls && calls.length > 0) {
-    console.log('[reports] call statuses:', JSON.stringify([...new Set(calls.map((c: any) => c.status))]));
-    const withTranscript = calls.filter((c: any) => Array.isArray(c.transcript) && c.transcript.length > 0);
+    console.log('[reports] call statuses:', JSON.stringify([...new Set(calls.map((c) => c.status))]));
+    const withTranscript = calls.filter((c) => Array.isArray(c.transcript) && (c.transcript as unknown[]).length > 0);
     console.log('[reports] calls with non-empty transcript:', withTranscript.length, '/', calls.length);
   }
   if (scores && scores.length > 0) {
-    console.log('[reports] score range: min', Math.min(...scores.map((s: any) => s.overall_score)),
-      'max', Math.max(...scores.map((s: any) => s.overall_score)));
+    console.log('[reports] score range: min', Math.min(...scores.map((s) => s.overall_score ?? 0)),
+      'max', Math.max(...scores.map((s) => s.overall_score ?? 0)));
   }
 
   const scoreByCallId = new Map((scores ?? []).map((s) => [s.call_id, s.overall_score]));

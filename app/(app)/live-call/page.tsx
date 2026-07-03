@@ -18,7 +18,6 @@ import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
 import type { CallMetrics, TimelineEvent, TimelineEventCategory, PostCallReport as PostCallReportType } from '@/lib/types';
-import { scoreToGrade } from '@/lib/types';
 import { scoreColor } from '@/lib/score-color';
 
 let timelineEventId = 0;
@@ -580,7 +579,9 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
   const mostEffectiveMoments = report.mostEffectiveMoments ?? [];
   const weakestMoments = report.weakestMoments ?? [];
   const whatShouldHaveBeenDifferent = report.whatShouldHaveBeenDifferent ?? [];
-  const aiUnavailable = !report.summary && !report.overallScore;
+  const missedOpportunities = report.missedOpportunities ?? [];
+  const improvementPlan = report.improvementPlan ?? [];
+  const aiUnavailable = !report.summary;
 
   const overallColor = scoreColor(report.overallScore ?? 0);
   const highlightTerms = [...objections, ...buyingSignals].filter(Boolean);
@@ -879,6 +880,49 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
                   ))
               }
             </div>
+
+            {/* Missed Opportunities */}
+            {missedOpportunities.length > 0 && (
+              <div className="glass-card rounded-2xl p-5 space-y-3" style={{ border: '1px solid rgba(239,68,68,0.15)' }}>
+                <h3 className="text-sm font-semibold text-red-400">Missed Opportunities</h3>
+                {missedOpportunities.map((o, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className="text-red-400 font-bold text-[10px] mt-0.5 shrink-0">!</span>
+                    <p className="text-xs text-slate-300 leading-relaxed">{o}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Buying Signals Detected */}
+            {buyingSignals.length > 0 && (
+              <div className="glass-card rounded-2xl p-5 space-y-3" style={{ border: '1px solid rgba(34,197,94,0.15)' }}>
+                <h3 className="text-sm font-semibold text-green-400">Buying Signals Detected</h3>
+                <div className="flex flex-wrap gap-2">
+                  {buyingSignals.map((s, i) => (
+                    <span key={i} className="text-[11px] px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-green-300">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Improvement Plan */}
+            {improvementPlan.length > 0 && (
+              <div className="glass-card rounded-2xl p-5 space-y-3" style={{ border: '1px solid rgba(212,175,55,0.15)' }}>
+                <h3 className="text-sm font-semibold" style={{ color: '#D4AF37' }}>30-Day Improvement Plan</h3>
+                {improvementPlan.map((item, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 text-[#090d18]"
+                      style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
+                      {i + 1}
+                    </span>
+                    <p className="text-xs text-slate-300 leading-relaxed">{item}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="glass-card rounded-2xl p-5 space-y-2">
