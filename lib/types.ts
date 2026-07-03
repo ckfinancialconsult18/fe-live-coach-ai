@@ -37,6 +37,51 @@ export interface BuyingSignal {
 }
 
 // ── Objection Engine ────────────────────────────────────────────────────────
+export type ObjectionPriority = 'critical' | 'high' | 'medium' | 'low';
+export type ObjectionStatus = 'active' | 'resolved' | 'reopened';
+
+/** Extended objection with coaching intelligence — superset of ObjectionAnalysis. */
+export interface EnhancedObjectionAnalysis {
+  type: string;
+  quote: string;
+  confidence: number;
+  priority: ObjectionPriority;
+  whyItOccurred: string;
+  recommendedResponse: string;
+  alternateResponse: string;
+  followUpQuestion: string;
+  emotionalContext: string;
+  mistakesToAvoid: string[];
+  closingBridge: string;
+}
+
+export interface ObjectionHistoryEntry {
+  id: string;
+  type: string;
+  label: string;
+  quote: string;
+  timestampMs: number;
+  confidence: number;
+  priority: ObjectionPriority;
+  reasoning: string;
+  status: ObjectionStatus;
+}
+
+export interface ObjectionPatternMatch {
+  label: string;
+  types: string[];
+  insight: string;
+  strongerApproach: string;
+}
+
+export interface LiveObjectionState {
+  primary: EnhancedObjectionAnalysis | null;
+  additional: EnhancedObjectionAnalysis[];
+  history: ObjectionHistoryEntry[];
+  patterns: ObjectionPatternMatch[];
+  riskScore: number;     // 0-100
+}
+
 export interface ObjectionAnalysis {
   type: string;
   quote: string;
@@ -129,6 +174,13 @@ export interface CoachInsight {
   // ── Milestone 3 Feature 2: Live Sales Scores ──────────────────────────────
   /** Deterministic live scores computed from observable metrics + LLM signals. Updated every coaching turn. */
   liveScores?: LiveSalesScores;
+
+  // ── Milestone 3 Feature 4: Enhanced Objection Intelligence ───────────────
+  /** Primary objection with full coaching intelligence (priority, mistakesToAvoid, closingBridge).
+   *  Falls back to library defaults if AI omits the new fields. */
+  enhancedObjection?: EnhancedObjectionAnalysis;
+  /** Secondary objections active simultaneously — sorted by priority, highest first. */
+  additionalObjections?: EnhancedObjectionAnalysis[];
 
   // ── Milestone 3 Feature 3: Missed Opportunity Detection ───────────────────
   /** Sparse map of discovery item state changes detected THIS turn by the AI.

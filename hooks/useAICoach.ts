@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState } from '@/lib/types';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriers } from '@/lib/carrier-rules';
 import { computeLiveScores } from '@/lib/score-live';
 import { computeMissedOpportunities } from '@/lib/discovery-engine';
+import { getObjectionDef, OBJECTION_TYPE_LABELS } from '@/lib/objection-library';
+import { detectPatterns } from '@/lib/objection-patterns';
 
 function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | undefined): CallMemory {
   if (!updates) return prev;
@@ -74,6 +76,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
   const [discoveryOverrides, setDiscoveryOverrides] = useState<Record<string, DiscoveryItemState>>({});
+  const [objectionHistory, setObjectionHistory] = useState<ObjectionHistoryEntry[]>([]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -93,11 +96,91 @@ export function useAICoach(transcript: TranscriptLine[]) {
     [transcript, discoveryOverrides, stage],
   );
 
+  // ── Live objection state ────────────────────────────────────────────────────
+  // Build EnhancedObjectionAnalysis from current insight, filling missing fields
+  // from the static library so coaching is always available immediately.
+  const liveObjectionState: LiveObjectionState = useMemo(() => {
+    const enrich = (raw: Record<string, unknown> | null | undefined): EnhancedObjectionAnalysis | null => {
+      if (!raw || typeof raw.type !== 'string') return null;
+      const def = getObjectionDef(raw.type);
+      return {
+        type: raw.type,
+        quote: (raw.quote as string) ?? '',
+        confidence: (raw.confidence as number) ?? 0,
+        priority: (raw.priority as ObjectionPriority) ?? def.priority,
+        whyItOccurred: (raw.whyItOccurred as string) ?? '',
+        recommendedResponse: (raw.recommendedResponse as string) ?? '',
+        alternateResponse: (raw.alternateResponse as string) ?? '',
+        followUpQuestion: (raw.followUpQuestion as string) ?? '',
+        emotionalContext: (raw.emotionalContext as string) ?? '',
+        mistakesToAvoid: (raw.mistakesToAvoid as string[]) ?? def.mistakesToAvoid,
+        closingBridge: (raw.closingBridge as string) ?? def.closingBridge,
+      };
+    };
+
+    const PRIORITY_RANK: Record<ObjectionPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+
+    const primary = insight.enhancedObjection
+      ? insight.enhancedObjection
+      : enrich(insight.objectionAnalysis as Record<string, unknown> | null);
+
+    const rawAdditional = (insight.additionalObjections ?? []) as unknown as Record<string, unknown>[];
+    const additional = rawAdditional
+      .map(r => enrich(r))
+      .filter((o): o is EnhancedObjectionAnalysis => o !== null)
+      .sort((a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority]);
+
+    const allActive = [...(primary ? [primary] : []), ...additional];
+    const activeTypes = allActive.map(o => o.type);
+    const patterns = detectPatterns(activeTypes);
+
+    // Risk score: sum of priority weights × confidence, capped at 100
+    const PRIORITY_W: Record<ObjectionPriority, number> = { critical: 35, high: 22, medium: 12, low: 5 };
+    const riskScore = Math.min(100, Math.round(
+      allActive.reduce((s, o) => s + PRIORITY_W[o.priority] * (o.confidence / 100), 0)
+    ));
+
+    return { primary, additional, history: objectionHistory, patterns, riskScore };
+  }, [insight, objectionHistory]);
+
   const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
     if (!rawInsight) return;
     if (rawInsight.memoryUpdates) {
       setMemory((prev) => mergeMemory(prev, rawInsight.memoryUpdates as Partial<CallMemory>));
     }
+    // Accumulate objection history — append new detections, dedup by type within 90s
+    const rawObjAnalysis = rawInsight.objectionAnalysis as Record<string, unknown> | null | undefined;
+    const rawAdditional = (rawInsight.additionalObjections ?? []) as Record<string, unknown>[];
+    const allRawObjections = [...(rawObjAnalysis ? [rawObjAnalysis] : []), ...rawAdditional];
+    if (allRawObjections.length > 0) {
+      const now = Date.now();
+      setObjectionHistory(prev => {
+        let updated = [...prev];
+        for (const raw of allRawObjections) {
+          if (typeof raw.type !== 'string' || (raw.confidence as number) < 55) continue;
+          const type = raw.type as string;
+          const def = getObjectionDef(type);
+          const recentDuplicate = updated.some(
+            h => h.type === type && now - h.timestampMs < 90_000
+          );
+          if (!recentDuplicate) {
+            updated = [...updated, {
+              id: `${type}-${now}`,
+              type,
+              label: OBJECTION_TYPE_LABELS[type] ?? type.replace(/_/g, ' '),
+              quote: (raw.quote as string) ?? '',
+              timestampMs: now,
+              confidence: (raw.confidence as number) ?? 0,
+              priority: (raw.priority as ObjectionPriority) ?? def.priority,
+              reasoning: (raw.whyItOccurred as string) ?? '',
+              status: 'active',
+            } satisfies ObjectionHistoryEntry];
+          }
+        }
+        return updated;
+      });
+    }
+
     // Merge AI discovery state updates — accumulate across turns, never reset
     if (rawInsight.discoveryUpdates && typeof rawInsight.discoveryUpdates === 'object') {
       const updates = rawInsight.discoveryUpdates as Record<string, DiscoveryItemState>;
@@ -240,5 +323,5 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 200);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities };
+  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities, liveObjectionState };
 }

@@ -12,6 +12,7 @@ import { MicrophoneControls } from '@/components/live-call/MicrophoneControls';
 import { MidCallMemoryPanel } from '@/components/live-call/MidCallMemoryPanel';
 import { LiveSalesScorePanel } from '@/components/live-call/LiveSalesScorePanel';
 import { MissedOpportunityPanel } from '@/components/live-call/MissedOpportunityPanel';
+import { LiveObjectionPanel } from '@/components/live-call/LiveObjectionPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
 import { useMicrophone } from '@/hooks/useMicrophone';
@@ -60,19 +61,20 @@ export default function LiveCallPage() {
     startListening, stopListening, clearTranscript, correctSpeaker,
     silenceWarning, audioWarning,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<PostCallReportType | null>(null);
   const [postCallError, setPostCallError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score'>('stage');
+  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score' | 'coach'>('stage');
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [momentum, setMomentum] = useState(0);
   const [preflight, setPreflight] = useState<PreflightResult>(null);
   const [showPreflight, setShowPreflight] = useState(true);
+  const [callStartMs, setCallStartMs] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef = useRef<number>(0);
@@ -143,6 +145,17 @@ export default function LiveCallPage() {
       }
     }
   }, [insight, pushTimelineEvent]);
+
+  // Auto-switch to 'coach' tab when a new critical/high objection is first detected.
+  const prevPrimaryTypeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const currentType = liveObjectionState.primary?.type ?? null;
+    if (currentType && currentType !== prevPrimaryTypeRef.current) {
+      prevPrimaryTypeRef.current = currentType;
+      const p = liveObjectionState.primary?.priority;
+      if (p === 'critical' || p === 'high') setRightTab('coach');
+    }
+  }, [liveObjectionState.primary]);
 
   // Timeline: first buying signal per category.
   useEffect(() => {
@@ -264,6 +277,7 @@ export default function LiveCallPage() {
     await autosave.startCall();
 
     callStartRef.current = Date.now();
+    setCallStartMs(callStartRef.current);
     timerRef.current = setInterval(() => {
       setDuration(Math.floor((Date.now() - callStartRef.current) / 1000));
     }, 1000);
@@ -456,19 +470,25 @@ export default function LiveCallPage() {
         <div className="flex flex-col w-[33%] min-w-0">
           {/* Tab bar */}
           <div className="flex border-b border-white/6 shrink-0">
-            {(['stage', 'uw', 'discovery', 'memory', 'score'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setRightTab(tab)}
-                className={`flex-1 py-2.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                  rightTab === tab
-                    ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
-                    : 'text-slate-600 hover:text-slate-400'
-                }`}
-              >
-                {tab === 'stage' ? 'Call Stage' : tab === 'uw' ? 'Underwriting' : tab === 'discovery' ? 'Discovery' : tab === 'memory' ? 'Memory' : 'Score'}
-              </button>
-            ))}
+            {(['stage', 'uw', 'discovery', 'memory', 'score', 'coach'] as const).map((tab) => {
+              const hasActiveObjection = tab === 'coach' && (liveObjectionState.primary !== null || liveObjectionState.additional.length > 0);
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setRightTab(tab)}
+                  className={`relative flex-1 py-2.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                    rightTab === tab
+                      ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
+                      : 'text-slate-600 hover:text-slate-400'
+                  }`}
+                >
+                  {tab === 'stage' ? 'Stage' : tab === 'uw' ? 'U/W' : tab === 'discovery' ? 'Discover' : tab === 'memory' ? 'Memory' : tab === 'score' ? 'Score' : 'Coach'}
+                  {hasActiveObjection && (
+                    <span className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-red-400" />
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -505,6 +525,9 @@ export default function LiveCallPage() {
             )}
             {rightTab === 'score' && (
               <LiveSalesScorePanel scores={liveScores} isAnalyzing={isAnalyzing} />
+            )}
+            {rightTab === 'coach' && (
+              <LiveObjectionPanel state={liveObjectionState} callStartMs={callStartMs} />
             )}
           </div>
         </div>
