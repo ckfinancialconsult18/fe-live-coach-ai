@@ -63,6 +63,18 @@ export interface NextBestAction {
   readyForApplicationReason: string;
 }
 
+// ── Live Sales Scores (Milestone 3 Feature 2) ────────────────────────────────
+export interface LiveSalesScores {
+  rapport: number;           // 0-100 — empathy, name use, emotional connection
+  discovery: number;         // 0-100 — checklist completion + question depth
+  trust: number;             // 0-100 — consistency + rapport + no stall
+  urgency: number;           // 0-100 — appropriate urgency established
+  presentation: number;      // 0-100 — product clarity relative to stage progress
+  objectionHandling: number; // 0-100 — 85 baseline when no objections, drops on stall
+  closingReadiness: number;  // 0-100 — close opportunity pct + NBA readiness
+  overall: number;           // 0-100 — weighted composite (matches post-call weights)
+}
+
 export interface CoachInsight {
   detectedObjection: string | null;
   objectType: 'objection' | 'buying_signal' | 'opportunity' | null;
@@ -87,6 +99,10 @@ export interface CoachInsight {
   familyReferences: string[];
   /** Incremental mid-call memory facts extracted this turn (Part 7) — merge into persistent CallMemory, never overwrite with null/empty. */
   memoryUpdates: Partial<CallMemory> | null;
+
+  // ── Milestone 3 Feature 2: Live Sales Scores ──────────────────────────────
+  /** Deterministic live scores computed from observable metrics + LLM signals. Updated every coaching turn. */
+  liveScores?: LiveSalesScores;
 
   // ── Milestone 3 Feature 1: Real-Time Situation Assessment ──────────────────
   /** True when the conversation has stalled — no new information being exchanged for multiple turns. */

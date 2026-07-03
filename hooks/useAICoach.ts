@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory } from '@/lib/types';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriers } from '@/lib/carrier-rules';
+import { computeLiveScores } from '@/lib/score-live';
 
 function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | undefined): CallMemory {
   if (!updates) return prev;
@@ -79,6 +80,11 @@ export function useAICoach(transcript: TranscriptLine[]) {
   useEffect(() => {
     memoryRef.current = memory;
   }, [memory]);
+
+  const liveScores: LiveSalesScores = useMemo(
+    () => computeLiveScores(insight, checklist, stage),
+    [insight, checklist, stage],
+  );
 
   const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
     if (!rawInsight) return;
@@ -220,5 +226,5 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 200);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory };
+  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores };
 }
