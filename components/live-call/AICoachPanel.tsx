@@ -106,7 +106,13 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
 
         {/* Next Best Action Engine */}
         {insight.nextBestAction ? (
-          <NextBestActionPanel action={insight.nextBestAction} />
+          <NextBestActionPanel
+            action={insight.nextBestAction}
+            stallDetected={insight.stallDetected}
+            likelyCominObjection={insight.likelyCominObjection}
+            rapportBuilt={insight.rapportBuilt}
+            discoveryComplete={insight.discoveryComplete}
+          />
         ) : (
           <div className="rounded-xl p-3 space-y-1.5 border"
             style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>

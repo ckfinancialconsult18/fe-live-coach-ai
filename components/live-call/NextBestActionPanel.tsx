@@ -4,6 +4,10 @@ import type { NextBestAction } from '@/lib/types';
 
 interface Props {
   action: NextBestAction;
+  stallDetected?: boolean;
+  likelyCominObjection?: string | null;
+  rapportBuilt?: boolean;
+  discoveryComplete?: boolean;
 }
 
 const GUIDANCE_META: Record<NextBestAction['talkListenGuidance'], { label: string; icon: string; color: string }> = {
@@ -23,11 +27,34 @@ const ACTION_TYPE_LABELS: Record<NextBestAction['actionType'], string> = {
   stop_talking: 'Stop Talking',
 };
 
-export function NextBestActionPanel({ action }: Props) {
+export function NextBestActionPanel({ action, stallDetected, likelyCominObjection, rapportBuilt, discoveryComplete }: Props) {
   const guidance = GUIDANCE_META[action.talkListenGuidance];
 
   return (
     <div className="rounded-xl p-3 space-y-3 border" style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>
+
+      {/* Situation Assessment — compact pill row */}
+      <div className="flex flex-wrap gap-1.5">
+        {stallDetected && (
+          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
+            ⚠ Stall Detected
+          </span>
+        )}
+        <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${rapportBuilt ? 'border-green-500/25 text-green-400' : 'border-white/10 text-slate-600'}`}
+          style={{ background: rapportBuilt ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)' }}>
+          {rapportBuilt ? '✓ Rapport' : '○ Build Rapport'}
+        </span>
+        <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${discoveryComplete ? 'border-green-500/25 text-green-400' : 'border-white/10 text-slate-600'}`}
+          style={{ background: discoveryComplete ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)' }}>
+          {discoveryComplete ? '✓ Discovery' : '○ Discovery'}
+        </span>
+        {likelyCominObjection && (
+          <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.10)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.25)' }}>
+            ↗ {likelyCominObjection.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Next Best Action</p>
         <div className="flex items-center gap-1.5">

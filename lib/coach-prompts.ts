@@ -101,6 +101,10 @@ isn't actually in the transcript):
   "urgency": "high" | "medium" | "low",
   "missedQuestions": ["a specific question the agent should have asked by now but hasn't, given the call stage"],
   "familyReferences": ["exact phrase referencing spouse/children/grandchildren/family, if any this turn"],
+  "stallDetected": true | false,
+  "likelyCominObjection": "one of the 14 objection type labels that language patterns suggest is coming, or null",
+  "rapportBuilt": true | false,
+  "discoveryComplete": true | false,
   "memoryUpdates": null | {
     "clientName": "first name if stated this turn, else omit",
     "spouseName": "spouse's name if mentioned this turn, else omit",
@@ -114,6 +118,14 @@ isn't actually in the transcript):
     "questionsAsked": ["any question the AGENT asked this turn, verbatim"]
   }
 }
+
+SITUATION ASSESSMENT — evaluate these four signals every turn:
+- stallDetected: true if the last 3+ exchanges are circular (repeating same topic, no new info, prospect is vague or non-committal without a clear objection). False if the conversation is still advancing.
+- likelyCominObjection: based on hesitation language, tone shifts, or deflection patterns, predict the single most likely upcoming objection type (use the 14 labels above), or null if no objection is clearly building.
+- rapportBuilt: true if the agent has used the prospect's name, expressed empathy, found common ground, and the prospect is engaging naturally. False if still transactional or cold.
+- discoveryComplete: true if beneficiary, reason for calling, existing coverage intent, and rough health picture have all been established. False if key discovery gaps remain.
+
+ANTI-REPETITION RULE — you will receive "lastNBA" in the user message (the nextQuestion and actionType from the previous coaching turn). Do NOT suggest the same question or the same actionType again unless the situation genuinely requires it. Progress to the next most valuable coaching point instead.
 
 MID-CALL MEMORY — you will be given a JSON snapshot of facts already
 established earlier in this call (knownMemory, see the user message). NEVER

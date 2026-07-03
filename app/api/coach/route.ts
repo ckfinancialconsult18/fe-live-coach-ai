@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
-  const { transcript, fullLength, memory } = await req.json() as { transcript: string; fullLength: number; memory?: Record<string, unknown> };
+  const { transcript, fullLength, memory, lastNBA } = await req.json() as { transcript: string; fullLength: number; memory?: Record<string, unknown>; lastNBA?: { actionType: string; nextQuestion: string } | null };
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
   const encoder = new TextEncoder();
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
               : []),
             {
               role: 'user',
-              content: `knownMemory (facts already established this call — do not re-ask these): ${JSON.stringify(memory ?? {})}\n\nCurrent conversation:\n\n${transcript}\n\nAnalyze this and respond in the exact JSON format specified.`,
+              content: `knownMemory (facts already established this call — do not re-ask these): ${JSON.stringify(memory ?? {})}${lastNBA ? `\n\nlastNBA (your previous coaching turn — do NOT repeat the same actionType or nextQuestion): ${JSON.stringify(lastNBA)}` : ''}\n\nCurrent conversation:\n\n${transcript}\n\nAnalyze this and respond in the exact JSON format specified.`,
             },
           ],
           temperature: 0.3,

@@ -87,6 +87,16 @@ export interface CoachInsight {
   familyReferences: string[];
   /** Incremental mid-call memory facts extracted this turn (Part 7) — merge into persistent CallMemory, never overwrite with null/empty. */
   memoryUpdates: Partial<CallMemory> | null;
+
+  // ── Milestone 3 Feature 1: Real-Time Situation Assessment ──────────────────
+  /** True when the conversation has stalled — no new information being exchanged for multiple turns. */
+  stallDetected: boolean;
+  /** The objection type most likely to arise in the next 2-3 exchanges based on language patterns, or null. */
+  likelyCominObjection: string | null;
+  /** True when enough rapport has been established to transition to discovery/health/budget. */
+  rapportBuilt: boolean;
+  /** True when discovery is substantially complete for the current call stage. */
+  discoveryComplete: boolean;
 }
 
 export interface UnderwritingProfile {

@@ -40,6 +40,10 @@ const DEFAULT_INSIGHT: CoachInsight = {
   missedQuestions: [],
   familyReferences: [],
   memoryUpdates: null,
+  stallDetected: false,
+  likelyCominObjection: null,
+  rapportBuilt: false,
+  discoveryComplete: false,
 };
 
 const DEFAULT_UNDERWRITING: UnderwritingProfile = {
@@ -71,6 +75,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const memoryRef = useRef(memory);
+  const lastNBARef = useRef<{ actionType: string; nextQuestion: string } | null>(null);
   useEffect(() => {
     memoryRef.current = memory;
   }, [memory]);
@@ -79,6 +84,11 @@ export function useAICoach(transcript: TranscriptLine[]) {
     if (!rawInsight) return;
     if (rawInsight.memoryUpdates) {
       setMemory((prev) => mergeMemory(prev, rawInsight.memoryUpdates as Partial<CallMemory>));
+    }
+    // Track last NBA for anti-repetition on the next coaching turn
+    const nba = rawInsight.nextBestAction as { actionType?: string; nextQuestion?: string } | null | undefined;
+    if (nba?.actionType) {
+      lastNBARef.current = { actionType: nba.actionType, nextQuestion: nba.nextQuestion ?? '' };
     }
     // Normalize defensively: the model may omit a field on a given turn
     // (e.g. no objection currently active) — fill gaps with neutral
@@ -94,6 +104,10 @@ export function useAICoach(transcript: TranscriptLine[]) {
       alternativeResponses: (rawInsight.alternativeResponses as string[]) ?? [],
       missedQuestions: (rawInsight.missedQuestions as string[]) ?? [],
       familyReferences: (rawInsight.familyReferences as string[]) ?? [],
+      stallDetected: (rawInsight.stallDetected as boolean) ?? false,
+      likelyCominObjection: (rawInsight.likelyCominObjection as string | null) ?? null,
+      rapportBuilt: (rawInsight.rapportBuilt as boolean) ?? false,
+      discoveryComplete: (rawInsight.discoveryComplete as boolean) ?? false,
     }));
   }, []);
 
@@ -153,7 +167,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
       const res = await fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length, memory: memoryRef.current }),
+        body: JSON.stringify({ transcript: transcriptText, fullLength: lines.length, memory: memoryRef.current, lastNBA: lastNBARef.current }),
         signal: ctrl.signal,
       });
 
