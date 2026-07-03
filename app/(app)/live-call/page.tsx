@@ -394,7 +394,7 @@ export default function LiveCallPage() {
   const listenPct = 100 - talkPct;
 
   if (showPostCall) {
-    return <PostCallReportView report={postCallReport} transcript={transcript} loading={loadingReport} error={postCallError} onClose={() => setShowPostCall(false)} />;
+    return <PostCallReportView report={postCallReport} transcript={transcript} loading={loadingReport} error={postCallError} onClose={() => setShowPostCall(false)} duration={duration} />;
   }
 
   return (
@@ -528,15 +528,41 @@ export default function LiveCallPage() {
 
 // ── Post-Call Report ──────────────────────────────────────────────────────────
 
-function PostCallReportView({ report, transcript, loading, error, onClose }: {
+function PostCallReportView({ report, transcript, loading, error, onClose, duration }: {
   report: PostCallReportType | null;
   transcript: { id: string; speaker: string; text: string }[];
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  duration?: number;
 }) {
   const [view, setView] = useState<'report' | 'timeline' | 'transcript'>('report');
   const [search, setSearch] = useState('');
+  const [historicalAvg, setHistoricalAvg] = useState<number | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/calls')
+      .then((r) => r.json())
+      .then((data: { calls?: { score?: number; started_at?: string }[] }) => {
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const scored = (data.calls ?? []).filter(
+          (c) => (c.score ?? 0) > 0 && new Date(c.started_at ?? 0).getTime() > cutoff
+        );
+        if (scored.length > 0) {
+          const avg = Math.round(scored.reduce((s, c) => s + (c.score ?? 0), 0) / scored.length);
+          setHistoricalAvg(avg);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  function copyToClipboard(text: string, key: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    }).catch(() => {});
+  }
 
   if (loading) {
     return (
@@ -600,25 +626,77 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
           {' '}Your call has been saved. The transcript is available below.
         </div>
       )}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/6 shrink-0">
-        <div>
-          <h2 className="text-xl font-bold text-slate-100">Post-Call Report</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {report.summary || (aiUnavailable ? 'Completed with AI unavailable' : '')}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-center">
-            <p className="text-3xl font-extrabold" style={{ color: overallColor }}>
-              {report.overallScore ?? 0}
-            </p>
-            <p className="text-[10px] text-slate-500">
-              Overall · Grade {report.overallGrade || 'N/A'}
-            </p>
+      {/* ── Executive Summary Hero ─────────────────────────────────────── */}
+      <div className="px-6 pt-5 pb-4 border-b border-white/6 shrink-0 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          {/* Score circle */}
+          <div className="flex items-center gap-5">
+            <div className="relative w-20 h-20 shrink-0">
+              <svg viewBox="0 0 80 80" className="w-20 h-20 -rotate-90">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
+                <circle
+                  cx="40" cy="40" r="34" fill="none"
+                  stroke={overallColor} strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeDasharray={`${Math.round(2 * Math.PI * 34 * (report.overallScore ?? 0) / 100)} 999`}
+                  style={{ transition: 'stroke-dasharray 1s ease' }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xl font-extrabold leading-none" style={{ color: overallColor }}>
+                  {report.overallScore ?? 0}
+                </span>
+                <span className="text-[9px] font-bold text-slate-400 mt-0.5">
+                  {report.overallGrade || 'N/A'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-100">Post-Call Report</h2>
+              {report.summary && <p className="text-sm text-slate-400 mt-1 max-w-lg leading-relaxed">{report.summary}</p>}
+              {/* Historical comparison */}
+              {historicalAvg !== null && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500">30-day avg:</span>
+                  <span className="text-[11px] font-semibold text-slate-300">{historicalAvg}</span>
+                  {(report.overallScore ?? 0) > historicalAvg ? (
+                    <span className="text-[10px] font-bold text-green-400">↑ +{(report.overallScore ?? 0) - historicalAvg} above avg</span>
+                  ) : (report.overallScore ?? 0) < historicalAvg ? (
+                    <span className="text-[10px] font-bold text-red-400">↓ {(report.overallScore ?? 0) - historicalAvg} below avg</span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-slate-500">= at avg</span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/8 text-slate-300 text-sm hover:bg-white/12 transition-colors">
-            ← New Call
-          </button>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => window.print()}
+              className="px-3 py-1.5 rounded-lg bg-white/6 text-slate-400 text-xs hover:bg-white/10 hover:text-slate-200 transition-colors border border-white/8 no-print"
+            >
+              Print / PDF
+            </button>
+            <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/8 text-slate-300 text-sm hover:bg-white/12 transition-colors no-print">
+              ← New Call
+            </button>
+          </div>
+        </div>
+        {/* Metric chips */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: 'Talk Ratio', value: `${report.talkPct ?? 0}%`, color: '#60a5fa' },
+            { label: 'Questions', value: String(report.questionsAskedCount ?? 0), color: '#D4AF37' },
+            { label: 'Objections', value: String(objections.length), color: objections.length > 3 ? '#ef4444' : '#94a3b8' },
+            ...(duration ? [{ label: 'Duration', value: `${Math.floor(duration / 60)}m ${duration % 60}s`, color: '#94a3b8' }] : []),
+            ...(report.weightedBreakdown ? [{ label: 'Confidence', value: `${report.weightedBreakdown.confidencePct}%`, color: '#a78bfa' }] : []),
+          ].map(({ label, value, color }) => (
+            <div key={label} className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-white/8 bg-white/4 text-[11px]">
+              <span className="text-slate-500">{label}:</span>
+              <span className="font-semibold" style={{ color }}>{value}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -824,7 +902,17 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
                   </p>
                 </div>
                 <div className="glass-card rounded-2xl p-5 space-y-2">
-                  <h3 className="text-sm font-semibold text-slate-300">CRM Notes</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-300">CRM Notes</h3>
+                    {report.crmNotes && (
+                      <button
+                        onClick={() => copyToClipboard(report.crmNotes!, 'crm')}
+                        className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/20 transition-colors no-print"
+                      >
+                        {copied === 'crm' ? '✓ Copied' : 'Copy'}
+                      </button>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-400 leading-relaxed">
                     {report.crmNotes || <span className="text-slate-600">Not available</span>}
                   </p>
@@ -926,13 +1014,33 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="glass-card rounded-2xl p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-blue-400">Follow-up Text</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-blue-400">Follow-up Text</h3>
+                  {report.followUpText && (
+                    <button
+                      onClick={() => copyToClipboard(report.followUpText!, 'text')}
+                      className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/20 transition-colors no-print"
+                    >
+                      {copied === 'text' ? '✓ Copied' : 'Copy'}
+                    </button>
+                  )}
+                </div>
                 <p className="text-xs text-slate-300 leading-relaxed bg-white/4 rounded-lg p-3 border border-white/6">
                   {report.followUpText || <span className="text-slate-600">Not available</span>}
                 </p>
               </div>
               <div className="glass-card rounded-2xl p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-violet-400">Follow-up Email</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-violet-400">Follow-up Email</h3>
+                  {report.followUpEmail && (
+                    <button
+                      onClick={() => copyToClipboard(report.followUpEmail!, 'email')}
+                      className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-slate-500 hover:text-slate-300 hover:border-white/20 transition-colors no-print"
+                    >
+                      {copied === 'email' ? '✓ Copied' : 'Copy'}
+                    </button>
+                  )}
+                </div>
                 <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line bg-white/4 rounded-lg p-3 border border-white/6">
                   {report.followUpEmail || <span className="text-slate-600">Not available</span>}
                 </p>

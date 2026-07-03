@@ -213,3 +213,33 @@ body {
 .stagger-4 { animation-delay: 0.20s; opacity: 0; }
 .stagger-5 { animation-delay: 0.25s; opacity: 0; }
 .stagger-6 { animation-delay: 0.30s; opacity: 0; }
+
+/* ── Print / PDF Export ──────────────────────────────────────────────────── */
+@media print {
+  /* Hide sidebar, top nav, and interactive controls */
+  aside, nav, [class*="TopNav"], [class*="Sidebar"],
+  .no-print { display: none !important; }
+
+  /* Expand main to full page width */
+  html, body { background: white !important; color: #0f172a !important; }
+  .flex.h-screen { display: block !important; }
+  main { overflow: visible !important; padding: 0 !important; }
+
+  /* Flatten dark glass cards to white */
+  .glass-card, .glass-card-raised {
+    background: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Readable text on white */
+  .text-slate-100, .text-slate-200, .text-slate-300 { color: #0f172a !important; }
+  .text-slate-400, .text-slate-500, .text-slate-600 { color: #475569 !important; }
+
+  /* Let report scroll to full height — no clip */
+  .overflow-hidden, .overflow-y-auto { overflow: visible !important; }
+  .flex-1 { flex: none !important; }
+  .h-full { height: auto !important; }
+}
