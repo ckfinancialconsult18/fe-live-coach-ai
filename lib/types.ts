@@ -182,6 +182,17 @@ export interface CoachInsight {
   /** Secondary objections active simultaneously — sorted by priority, highest first. */
   additionalObjections?: EnhancedObjectionAnalysis[];
 
+  // ── Milestone 3 Feature 5: Live Closing Assistant ────────────────────────
+  /** AI-provided closing intelligence — reasons, script, and danger signals.
+   *  Deterministic fields (probability, requirements, buying signal strengths)
+   *  are computed in closing-engine.ts from observable transcript signals. */
+  closingAssistant?: {
+    reasons?: CloseProbabilityReason[];
+    closingScript?: string;
+    dangerSignals?: { type: string; description: string }[];
+    buyingSignalStrengths?: { category: string; strength: string }[];
+  };
+
   // ── Milestone 3 Feature 3: Missed Opportunity Detection ───────────────────
   /** Sparse map of discovery item state changes detected THIS turn by the AI.
    *  Only items whose state changed are included — not the full 21-item list. */
@@ -461,6 +472,60 @@ export interface PostCallReport {
   weightedBreakdown?: WeightedScoreBreakdown;
   /** Server-computed conversation analysis (Feature 2). */
   conversationAnalysis?: ConversationAnalysis;
+}
+
+// ── Milestone 3 Feature 5: Live Closing Assistant ────────────────────────────
+
+export type ClosingReadiness =
+  | 'ready_to_close'
+  | 'almost_ready'
+  | 'needs_discovery'
+  | 'high_risk'
+  | 'lost_sale';
+
+export type BuyingSignalStrength = 'weak' | 'moderate' | 'strong' | 'very_strong';
+
+export interface EnhancedBuyingSignal {
+  category: string;
+  label: string;
+  strength: BuyingSignalStrength;
+  quote: string;
+}
+
+export interface DangerSignal {
+  type: string;
+  label: string;
+  description: string;
+}
+
+export interface ClosingRequirement {
+  id: string;
+  label: string;
+  met: boolean;
+}
+
+export interface CloseProbabilityReason {
+  text: string;
+  direction: '+' | '-';
+  evidence?: string;
+}
+
+export interface ProbabilitySnapshot {
+  value: number;
+  timestampMs: number;
+}
+
+export interface LiveClosingState {
+  probability: number;
+  confidence: number;
+  readiness: ClosingReadiness;
+  reasons: CloseProbabilityReason[];
+  requirements: ClosingRequirement[];
+  nextAction: string;
+  closingScript: string;
+  buyingSignals: EnhancedBuyingSignal[];
+  dangerSignals: DangerSignal[];
+  probabilityHistory: ProbabilitySnapshot[];
 }
 
 // ── CRM types ─────────────────────────────────────────────────────────────────

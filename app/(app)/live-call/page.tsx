@@ -13,6 +13,7 @@ import { MidCallMemoryPanel } from '@/components/live-call/MidCallMemoryPanel';
 import { LiveSalesScorePanel } from '@/components/live-call/LiveSalesScorePanel';
 import { MissedOpportunityPanel } from '@/components/live-call/MissedOpportunityPanel';
 import { LiveObjectionPanel } from '@/components/live-call/LiveObjectionPanel';
+import { LiveClosingPanel } from '@/components/live-call/LiveClosingPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
 import { useMicrophone } from '@/hooks/useMicrophone';
@@ -61,14 +62,14 @@ export default function LiveCallPage() {
     startListening, stopListening, clearTranscript, correctSpeaker,
     silenceWarning, audioWarning,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<PostCallReportType | null>(null);
   const [postCallError, setPostCallError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score' | 'coach'>('stage');
+  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score' | 'coach' | 'close'>('stage');
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [momentum, setMomentum] = useState(0);
@@ -153,6 +154,7 @@ export default function LiveCallPage() {
     if (currentType && currentType !== prevPrimaryTypeRef.current) {
       prevPrimaryTypeRef.current = currentType;
       const p = liveObjectionState.primary?.priority;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (p === 'critical' || p === 'high') setRightTab('coach');
     }
   }, [liveObjectionState.primary]);
@@ -470,21 +472,25 @@ export default function LiveCallPage() {
         <div className="flex flex-col w-[33%] min-w-0">
           {/* Tab bar */}
           <div className="flex border-b border-white/6 shrink-0">
-            {(['stage', 'uw', 'discovery', 'memory', 'score', 'coach'] as const).map((tab) => {
+            {(['stage', 'uw', 'discovery', 'memory', 'score', 'coach', 'close'] as const).map((tab) => {
               const hasActiveObjection = tab === 'coach' && (liveObjectionState.primary !== null || liveObjectionState.additional.length > 0);
+              const TAB_LABEL: Record<string, string> = {
+                stage: 'Stage', uw: 'U/W', discovery: 'Disc', memory: 'Mem',
+                score: 'Score', coach: 'Coach', close: 'Close',
+              };
               return (
                 <button
                   key={tab}
                   onClick={() => setRightTab(tab)}
-                  className={`relative flex-1 py-2.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                  className={`relative flex-1 py-2 text-[9px] font-semibold uppercase tracking-wide transition-colors ${
                     rightTab === tab
                       ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
                       : 'text-slate-600 hover:text-slate-400'
                   }`}
                 >
-                  {tab === 'stage' ? 'Stage' : tab === 'uw' ? 'U/W' : tab === 'discovery' ? 'Discover' : tab === 'memory' ? 'Memory' : tab === 'score' ? 'Score' : 'Coach'}
+                  {TAB_LABEL[tab]}
                   {hasActiveObjection && (
-                    <span className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-red-400" />
+                    <span className="absolute top-1 right-0.5 w-1.5 h-1.5 rounded-full bg-red-400" />
                   )}
                 </button>
               );
@@ -528,6 +534,9 @@ export default function LiveCallPage() {
             )}
             {rightTab === 'coach' && (
               <LiveObjectionPanel state={liveObjectionState} callStartMs={callStartMs} />
+            )}
+            {rightTab === 'close' && (
+              <LiveClosingPanel state={liveClosingState} isAnalyzing={isAnalyzing} />
             )}
           </div>
         </div>

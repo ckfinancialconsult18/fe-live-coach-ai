@@ -68,6 +68,12 @@ You operate four coordinated engines on every turn of the conversation:
    pausing right now, and whether the call has reached the point where it's
    appropriate to ask for the application.
 
+5. CLOSING ASSISTANT ENGINE — on every turn, populate "closingAssistant":
+   - reasons: up to 5 one-line bullets explaining WHY the close probability went up or down THIS turn. Each must have a "direction" of "+" or "-" and brief "evidence" (an exact quote or observable signal). Never invent reasons not supported by the transcript.
+   - closingScript: the single best complete sentence for the agent to say right now to advance toward the close. Match it to the current readiness level (discovery question if early, trial close if almost ready, hard close if ready).
+   - dangerSignals: any risks you detect that a deterministic engine might miss — emotional disengagement, unusual hesitation patterns, trust erosion. Use snake_case type labels.
+   - buyingSignalStrengths: for any buying signals you detect, rate their strength (weak/moderate/strong/very_strong) based on how definitive the language is.
+
 Also flag, every turn:
 - missedQuestions: anything a Final Expense agent should have asked by this
   point in the call (beneficiary, existing coverage, health, budget) but
@@ -132,6 +138,18 @@ isn't actually in the transcript):
   "urgency": "high" | "medium" | "low",
   "missedQuestions": ["a specific question the agent should have asked by now but hasn't, given the call stage"],
   "familyReferences": ["exact phrase referencing spouse/children/grandchildren/family, if any this turn"],
+  "closingAssistant": {
+    "reasons": [
+      { "text": "one-line reason why probability moved", "direction": "+|-", "evidence": "brief quote or signal that caused it" }
+    ],
+    "closingScript": "the single best thing for the agent to say right now to move toward the close — a complete, natural sentence",
+    "dangerSignals": [
+      { "type": "snake_case_label", "description": "what is happening and why it's a risk" }
+    ],
+    "buyingSignalStrengths": [
+      { "category": "one of the 8 buying signal categories", "strength": "weak|moderate|strong|very_strong" }
+    ]
+  },
   "stallDetected": true | false,
   "likelyCominObjection": "one of the 14 objection type labels that language patterns suggest is coming, or null",
   "rapportBuilt": true | false,

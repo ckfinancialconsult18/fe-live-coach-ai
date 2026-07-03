@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState } from '@/lib/types';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState, ProbabilitySnapshot, LiveClosingState } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriers } from '@/lib/carrier-rules';
 import { computeLiveScores } from '@/lib/score-live';
 import { computeMissedOpportunities } from '@/lib/discovery-engine';
 import { getObjectionDef, OBJECTION_TYPE_LABELS } from '@/lib/objection-library';
 import { detectPatterns } from '@/lib/objection-patterns';
+import { computeClosingState } from '@/lib/closing-engine';
 
 function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | undefined): CallMemory {
   if (!updates) return prev;
@@ -77,6 +78,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
   const [discoveryOverrides, setDiscoveryOverrides] = useState<Record<string, DiscoveryItemState>>({});
   const [objectionHistory, setObjectionHistory] = useState<ObjectionHistoryEntry[]>([]);
+  const [probabilityHistory, setProbabilityHistory] = useState<ProbabilitySnapshot[]>([]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -143,6 +145,12 @@ export function useAICoach(transcript: TranscriptLine[]) {
     return { primary, additional, history: objectionHistory, patterns, riskScore };
   }, [insight, objectionHistory]);
 
+  // ── Live closing state ──────────────────────────────────────────────────────
+  const liveClosingState: LiveClosingState = useMemo(
+    () => computeClosingState(insight, checklist, stage, liveScores, missedOpportunities, liveObjectionState, probabilityHistory),
+    [insight, checklist, stage, liveScores, missedOpportunities, liveObjectionState, probabilityHistory],
+  );
+
   const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
     if (!rawInsight) return;
     if (rawInsight.memoryUpdates) {
@@ -178,6 +186,16 @@ export function useAICoach(transcript: TranscriptLine[]) {
           }
         }
         return updated;
+      });
+    }
+
+    // Track probability history for closing assistant timeline
+    const newProb = (rawInsight.closeOpportunityPct as number | undefined) ?? 0;
+    if (newProb > 0) {
+      setProbabilityHistory(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.value === newProb) return prev;
+        return [...prev.slice(-59), { value: newProb, timestampMs: Date.now() }];
       });
     }
 
@@ -323,5 +341,5 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 200);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities, liveObjectionState };
+  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState };
 }
