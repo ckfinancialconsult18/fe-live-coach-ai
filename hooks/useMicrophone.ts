@@ -10,7 +10,15 @@ import {
 } from '@/lib/audio/devices';
 import { createLevelMeter, type LevelMeter } from '@/lib/audio/level-meter';
 
-export type MicHealth = 'idle' | 'healthy' | 'silent' | 'disconnected' | 'error';
+/**
+ * idle        — mic not started
+ * healthy     — audio is flowing
+ * silent      — no audio detected for SILENCE_TIMEOUT_MS (may indicate device issue)
+ * muted       — OS muted the track (another app took the input device; common during phone calls)
+ * disconnected — track.readyState === 'ended' (device unplugged / permission revoked)
+ * error       — getUserMedia threw
+ */
+export type MicHealth = 'idle' | 'healthy' | 'silent' | 'muted' | 'disconnected' | 'error';
 
 export interface UseMicrophoneReturn {
   devices: AudioInputDevice[];
@@ -106,9 +114,41 @@ export function useMicrophone(): UseMicrophoneReturn {
       previousStream?.getTracks().forEach((t) => t.stop());
       if (previousContext && previousContext.state !== 'closed') previousContext.close().catch(() => {});
 
-      // Health monitoring: device unplugged / track ends unexpectedly.
+      // Health monitoring: device unplugged / track ends / OS mutes the track.
+      // MUTED means the OS stopped delivering audio samples to this track — the
+      // classic signature of a phone call, FaceTime, or Bluetooth headset taking
+      // the input device. The track is still "live" but outputs silence.
       const track = newStream.getAudioTracks()[0];
-      track.onended = () => setHealth('disconnected');
+
+      // Log the actual applied constraints so we can verify AEC/NS/AGC are off.
+      const settings = track.getSettings();
+      const caps = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
+      console.log('[microphone] track acquired —',
+        `label="${track.label}"`,
+        `deviceId=${settings.deviceId ?? 'unknown'}`,
+        `sampleRate=${settings.sampleRate ?? 'unknown'}`,
+        `channelCount=${settings.channelCount ?? 'unknown'}`,
+        `echoCancellation=${settings.echoCancellation ?? 'unknown'}`,
+        `noiseSuppression=${settings.noiseSuppression ?? 'unknown'}`,
+        `autoGainControl=${settings.autoGainControl ?? 'unknown'}`,
+      );
+      if (Object.keys(caps).length) {
+        console.log('[microphone] track capabilities:', JSON.stringify(caps));
+      }
+      track.onended = () => {
+        console.error('[microphone] track ended — device disconnected or permission revoked');
+        setHealth('disconnected');
+      };
+      track.onmute = () => {
+        console.warn('[microphone] TRACK MUTED by OS — another app (phone call, FaceTime, ' +
+          'Bluetooth) has taken the audio input device. Recording will produce SILENT chunks ' +
+          `until the device is released. track: label="${track.label}" readyState=${track.readyState}`);
+        setHealth('muted');
+      };
+      track.onunmute = () => {
+        console.log('[microphone] track unmuted — audio delivery resumed');
+        setHealth('healthy');
+      };
 
       lastSignalAtRef.current = Date.now();
       if (pollRef.current) clearInterval(pollRef.current);
@@ -119,6 +159,9 @@ export function useMicrophone(): UseMicrophoneReturn {
 
         if (track.readyState === 'ended') {
           setHealth('disconnected');
+        } else if (track.muted) {
+          // onmute already set this, but keep it consistent in the poll too
+          setHealth('muted');
         } else if (Date.now() - lastSignalAtRef.current > SILENCE_TIMEOUT_MS) {
           setHealth('silent');
         } else {

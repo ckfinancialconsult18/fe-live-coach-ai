@@ -31,6 +31,11 @@ export interface UseDeepgramTranscriptionReturn {
   disableSpeakerMode: () => void;
   /** Non-fatal warning from the audio manager (e.g. system audio declined). */
   audioWarning: string | null;
+  /**
+   * Set when consecutive silent chunks are detected. Explains the most likely
+   * cause so the user can act (e.g. check device, disable Bluetooth call mode).
+   */
+  silenceWarning: string | null;
 }
 
 // Sent as x-pipeline-version with every chunk so server logs show which
@@ -45,6 +50,8 @@ const CHUNK_INTERVAL_MS = 4000;
 const MIN_CHUNK_BYTES = 500;
 // RMS peak below this across a whole chunk → the chunk contained only silence.
 const SILENCE_PEAK_THRESHOLD = 0.01;
+// How many consecutive silent chunks before we surface a warning to the user.
+const SILENCE_WARNING_CHUNKS = 2;
 
 let lineSeq = 0;
 function nextId() { return `dg-${++lineSeq}`; }
@@ -115,6 +122,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [silenceWarning, setSilenceWarning] = useState<string | null>(null);
 
   // AudioInputManager owns which sources are active and produces the merged stream.
   const audioManager = useAudioInputManager(mic);
@@ -127,6 +135,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const reconnectAttemptRef = useRef(0);
   const usingWebSpeechRef = useRef(false);
   const chunkSeqRef = useRef(0);
+  const consecutiveSilentChunksRef = useRef(0);
   // Level monitor + heartbeat for diagnosing silent chunks
   const monitorCtxRef = useRef<AudioContext | null>(null);
   const monitorMeterRef = useRef<LevelMeter | null>(null);
@@ -344,13 +353,38 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         `blob.type=${blob.type} avgRMS=${avgRms.toFixed(4)} peakRMS=${peak.toFixed(4)} rmsSamples=${n}`);
 
       if (n > 0 && peak < SILENCE_PEAK_THRESHOLD) {
+        consecutiveSilentChunksRef.current += 1;
         const states = tracks.map((t, i) =>
           `track[${i}]: readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`
         ).join(' | ');
-        console.warn(`[transcription] chunk #${seq} contained ONLY SILENCE (peakRMS=${peak.toFixed(4)}). ` +
-          `Causes: (1) OS took the input device (phone call/Bluetooth switched modes); ` +
-          `(2) echo cancellation zeroed the signal; (3) merge AudioContext is suspended. ` +
+        console.warn(`[transcription] chunk #${seq} contained ONLY SILENCE (peakRMS=${peak.toFixed(4)}) ` +
+          `consecutiveSilentChunks=${consecutiveSilentChunksRef.current}. ` +
+          `Likely causes in order: (1) OS handed the audio device to another app ` +
+          `(phone call, FaceTime, Bluetooth headset switching to call profile) — ` +
+          `track.muted will be true; (2) echoCancellation is on and subtracted speaker ` +
+          `audio as echo — check track settings; (3) merge AudioContext is suspended. ` +
           `Current track states: ${states}`);
+        if (consecutiveSilentChunksRef.current >= SILENCE_WARNING_CHUNKS) {
+          const mutedTracks = tracks.filter((t) => t.muted);
+          if (mutedTracks.length > 0) {
+            setSilenceWarning(
+              'Microphone muted by OS — your audio device was taken by a phone call or Bluetooth app. ' +
+              'Audio will resume automatically when the device is released.'
+            );
+          } else {
+            setSilenceWarning(
+              'No audio detected. Check that your microphone is not muted in system settings, ' +
+              'and that echo cancellation is disabled (it erases speakerphone audio).'
+            );
+          }
+        }
+      } else if (n > 0) {
+        // Audio is present — clear any stale silence warning
+        if (consecutiveSilentChunksRef.current > 0) {
+          console.log(`[transcription] chunk #${seq} audio restored after ${consecutiveSilentChunksRef.current} silent chunk(s)`);
+          setSilenceWarning(null);
+        }
+        consecutiveSilentChunksRef.current = 0;
       }
 
       // Verify the blob starts with a WebM container header (EBML magic bytes 1a 45 df a3).
@@ -456,6 +490,32 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
     setConnectionState('connecting');
     setError(null);
+    setSilenceWarning(null);
+    consecutiveSilentChunksRef.current = 0;
+
+    // Log full constraint audit so we can see exactly what the browser applied.
+    const micTrack = (explicitStream ?? mic.stream)?.getAudioTracks()[0];
+    if (micTrack) {
+      const s = micTrack.getSettings();
+      console.log('[transcription] mic constraint audit —',
+        `device="${micTrack.label}"`,
+        `sampleRate=${s.sampleRate ?? '?'}`,
+        `channelCount=${s.channelCount ?? '?'}`,
+        `echoCancellation=${s.echoCancellation ?? '?'}`,
+        `noiseSuppression=${s.noiseSuppression ?? '?'}`,
+        `autoGainControl=${s.autoGainControl ?? '?'}`,
+        `readyState=${micTrack.readyState}`,
+        `muted=${micTrack.muted}`,
+      );
+      if (s.echoCancellation) {
+        console.warn('[transcription] ⚠ echoCancellation is ON — the browser will subtract ' +
+          'speakerphone audio as echo. Phone call audio playing through speakers will be erased.');
+      }
+      if (s.noiseSuppression) {
+        console.warn('[transcription] ⚠ noiseSuppression is ON — far-field audio (phone call ' +
+          'through speakers) will be heavily attenuated.');
+      }
+    }
 
     // Rebuild ensures AudioInputManager reflects the latest mic stream.
     audioManager.rebuild();
@@ -514,6 +574,32 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     );
   }, []);
 
+  // ── Auto-restart on track disconnect ───────────────────────────────────────
+  // When the OS ends the track (device unplugged, permission revoked) we try to
+  // re-acquire the microphone and seamlessly continue transcription.
+  const micRef = useRef(mic);
+  useEffect(() => { micRef.current = mic; }, [mic]);
+
+  useEffect(() => {
+    if (!shouldReconnectRef.current) return;
+    if (mic.health !== 'disconnected') return;
+
+    console.warn('[transcription] mic.health=disconnected — attempting re-acquire');
+    micRef.current.start().then((newStream) => {
+      if (!newStream) {
+        console.error('[transcription] re-acquire failed — mic.error:', micRef.current.error);
+        return;
+      }
+      console.log('[transcription] re-acquire succeeded — rebuilding stream and restarting recorder');
+      audioManager.rebuild();
+      // streamRef will be updated by the audioManager.stream effect on the next render.
+      // The current chunk cycle will finish naturally; onstop will call startChunkCycle
+      // which picks up the new streamRef.current.
+    }).catch((err) => {
+      console.error('[transcription] re-acquire threw:', err instanceof Error ? err.message : err);
+    });
+  }, [mic.health, audioManager]);
+
   useEffect(() => () => stopListening(), [stopListening]);
 
   return {
@@ -530,5 +616,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     enableSpeakerMode: audioManager.acquireSpeakerMode,
     disableSpeakerMode: audioManager.releaseSpeakerMode,
     audioWarning: audioManager.warning,
+    silenceWarning,
   };
 }

@@ -57,6 +57,7 @@ export default function LiveCallPage() {
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
+    silenceWarning, audioWarning,
   } = useDeepgramTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory } = useAICoach(transcript);
 
@@ -421,6 +422,14 @@ export default function LiveCallPage() {
           <p className="text-slate-600">
             Check <a href="/api/live-call-status" target="_blank" className="text-[#D4AF37] underline">/api/live-call-status</a> for a full diagnostic, or see the browser console for details.
           </p>
+        </div>
+      )}
+
+      {/* Silence / audio device warning — shown when mic goes silent mid-call */}
+      {(silenceWarning || audioWarning || mic.health === 'muted') && isListening && (
+        <div className="shrink-0 mx-4 mb-1 rounded-xl border border-yellow-500/25 bg-yellow-500/8 px-4 py-2.5 text-xs text-yellow-300 leading-relaxed">
+          <span className="font-semibold">Audio warning: </span>
+          {silenceWarning ?? audioWarning ?? 'Microphone muted by OS — another app is using the audio device. Recording will resume when it is released.'}
         </div>
       )}
 
