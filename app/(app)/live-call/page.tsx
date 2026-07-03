@@ -252,7 +252,8 @@ export default function LiveCallPage() {
     const stream = await mic.start();
     if (!stream) return; // mic.error already surfaces a real error to the UI
 
-    await startListening();
+    // Pass the stream directly — mic.stream React state may not have flushed yet.
+    await startListening(stream);
     await autosave.startCall();
 
     callStartRef.current = Date.now();
