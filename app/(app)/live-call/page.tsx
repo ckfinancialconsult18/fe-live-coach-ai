@@ -475,7 +475,7 @@ export default function LiveCallPage() {
             {rightTab === 'stage' && (
               <div className="flex flex-col h-full divide-y divide-white/6">
                 <div className="flex-shrink-0" style={{ minHeight: 0 }}>
-                  <CallStagePanel currentStage={stage} />
+                  <CallStagePanel currentStage={stage} checklist={checklist} nextBestAction={insight.nextBestAction} />
                 </div>
                 <MetricsPanel
                   talkPct={talkPct}
