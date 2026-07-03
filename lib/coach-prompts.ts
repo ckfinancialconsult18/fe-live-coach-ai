@@ -105,6 +105,9 @@ isn't actually in the transcript):
   "likelyCominObjection": "one of the 14 objection type labels that language patterns suggest is coming, or null",
   "rapportBuilt": true | false,
   "discoveryComplete": true | false,
+  "discoveryUpdates": {
+    "<itemId>": "completed" | "in_progress" | "needs_followup"
+  },
   "memoryUpdates": null | {
     "clientName": "first name if stated this turn, else omit",
     "spouseName": "spouse's name if mentioned this turn, else omit",
@@ -124,6 +127,21 @@ SITUATION ASSESSMENT — evaluate these four signals every turn:
 - likelyCominObjection: based on hesitation language, tone shifts, or deflection patterns, predict the single most likely upcoming objection type (use the 14 labels above), or null if no objection is clearly building.
 - rapportBuilt: true if the agent has used the prospect's name, expressed empathy, found common ground, and the prospect is engaging naturally. False if still transactional or cold.
 - discoveryComplete: true if beneficiary, reason for calling, existing coverage intent, and rough health picture have all been established. False if key discovery gaps remain.
+
+DISCOVERY TRACKING — on every turn, populate "discoveryUpdates" with ONLY the items whose state changed THIS turn. Valid item IDs:
+reason_for_buying, burial_wishes, funeral_planning, financial_concerns,
+beneficiary_name, beneficiary_relationship, children,
+tobacco, medications, hospitalizations, doctors,
+existing_coverage, mortgage, budget, monthly_income, emergency_fund,
+bank_account, preferred_payment_date, checking_account, address_verification, dob_verification.
+
+Rules:
+- "completed": the prospect gave a clear, complete answer this turn (or earlier — if you notice something the keyword engine may have missed, mark it now).
+- "needs_followup": the prospect gave an INCOMPLETE answer (e.g. "I have insurance" without saying type/amount; "I quit" without saying when; "I take some pills" without naming them). The agent must follow up.
+- "in_progress": the agent raised this topic this turn but no answer was received yet.
+- NEVER mark an item "completed" unless the conversation actually supports it.
+- NEVER repeat an item in discoveryUpdates if it was already "completed" in a prior turn (unless a contradiction was detected — then use "needs_followup").
+- Omit items whose state did NOT change this turn. The discoveryUpdates object should only contain changed items. If nothing changed, emit an empty object: {}.
 
 ANTI-REPETITION RULE — you will receive "lastNBA" in the user message (the nextQuestion and actionType from the previous coaching turn). Do NOT suggest the same question or the same actionType again unless the situation genuinely requires it. Progress to the next most valuable coaching point instead.
 

@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores } from '@/lib/types';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriers } from '@/lib/carrier-rules';
 import { computeLiveScores } from '@/lib/score-live';
+import { computeMissedOpportunities } from '@/lib/discovery-engine';
 
 function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | undefined): CallMemory {
   if (!updates) return prev;
@@ -72,6 +73,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>(DEFAULT_CHECKLIST);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
+  const [discoveryOverrides, setDiscoveryOverrides] = useState<Record<string, DiscoveryItemState>>({});
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -86,10 +88,22 @@ export function useAICoach(transcript: TranscriptLine[]) {
     [insight, checklist, stage, transcript],
   );
 
+  const missedOpportunities: MissedOpportunityState = useMemo(
+    () => computeMissedOpportunities(transcript, discoveryOverrides, stage),
+    [transcript, discoveryOverrides, stage],
+  );
+
   const applyInsight = useCallback((rawInsight: Record<string, unknown> | undefined) => {
     if (!rawInsight) return;
     if (rawInsight.memoryUpdates) {
       setMemory((prev) => mergeMemory(prev, rawInsight.memoryUpdates as Partial<CallMemory>));
+    }
+    // Merge AI discovery state updates — accumulate across turns, never reset
+    if (rawInsight.discoveryUpdates && typeof rawInsight.discoveryUpdates === 'object') {
+      const updates = rawInsight.discoveryUpdates as Record<string, DiscoveryItemState>;
+      if (Object.keys(updates).length > 0) {
+        setDiscoveryOverrides(prev => ({ ...prev, ...updates }));
+      }
     }
     // Track last NBA for anti-repetition on the next coaching turn
     const nba = rawInsight.nextBestAction as { actionType?: string; nextQuestion?: string } | null | undefined;
@@ -226,5 +240,5 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 200);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores };
+  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities };
 }

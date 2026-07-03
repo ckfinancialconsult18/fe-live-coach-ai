@@ -63,6 +63,32 @@ export interface NextBestAction {
   readyForApplicationReason: string;
 }
 
+// ── Milestone 3 Feature 3: Missed Opportunity Detection ─────────────────────
+
+export type DiscoveryItemState = 'not_started' | 'in_progress' | 'completed' | 'needs_followup';
+
+export interface DiscoveryItem {
+  id: string;
+  label: string;
+  category: 'motivation' | 'beneficiary' | 'health' | 'financial' | 'logistics';
+  state: DiscoveryItemState;
+  note: string | null;          // why needs_followup, or what value was detected
+}
+
+export interface NextDiscoveryQuestion {
+  itemId: string;
+  label: string;
+  question: string;
+  urgency: 'critical' | 'high' | 'normal';
+}
+
+export interface MissedOpportunityState {
+  items: DiscoveryItem[];
+  nextQuestion: NextDiscoveryQuestion | null;
+  progressPct: number;           // (completed / total) × 100
+  contradictions: string[];      // human-readable contradiction descriptions
+}
+
 // ── Live Sales Scores (Milestone 3 Feature 2) ────────────────────────────────
 export interface LiveSalesScores {
   rapport: number;           // 0-100 — empathy, name use, emotional connection
@@ -103,6 +129,11 @@ export interface CoachInsight {
   // ── Milestone 3 Feature 2: Live Sales Scores ──────────────────────────────
   /** Deterministic live scores computed from observable metrics + LLM signals. Updated every coaching turn. */
   liveScores?: LiveSalesScores;
+
+  // ── Milestone 3 Feature 3: Missed Opportunity Detection ───────────────────
+  /** Sparse map of discovery item state changes detected THIS turn by the AI.
+   *  Only items whose state changed are included — not the full 21-item list. */
+  discoveryUpdates?: Record<string, DiscoveryItemState>;
 
   // ── Milestone 3 Feature 1: Real-Time Situation Assessment ──────────────────
   /** True when the conversation has stalled — no new information being exchanged for multiple turns. */

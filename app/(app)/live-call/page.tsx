@@ -6,12 +6,12 @@ import { AICoachPanel } from '@/components/live-call/AICoachPanel';
 import { CallStagePanel } from '@/components/live-call/CallStagePanel';
 import { MetricsPanel } from '@/components/live-call/MetricsPanel';
 import { UnderwritingPanel } from '@/components/live-call/UnderwritingPanel';
-import { LiveReminders } from '@/components/live-call/LiveReminders';
 import { QuickObjectionBar } from '@/components/live-call/QuickObjectionBar';
 import { CallMetricsBar } from '@/components/live-call/CallMetricsBar';
 import { MicrophoneControls } from '@/components/live-call/MicrophoneControls';
 import { MidCallMemoryPanel } from '@/components/live-call/MidCallMemoryPanel';
 import { LiveSalesScorePanel } from '@/components/live-call/LiveSalesScorePanel';
+import { MissedOpportunityPanel } from '@/components/live-call/MissedOpportunityPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
 import { useMicrophone } from '@/hooks/useMicrophone';
@@ -60,14 +60,14 @@ export default function LiveCallPage() {
     startListening, stopListening, clearTranscript, correctSpeaker,
     silenceWarning, audioWarning,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<PostCallReportType | null>(null);
   const [postCallError, setPostCallError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'reminders' | 'memory' | 'score'>('stage');
+  const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score'>('stage');
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [momentum, setMomentum] = useState(0);
@@ -456,7 +456,7 @@ export default function LiveCallPage() {
         <div className="flex flex-col w-[33%] min-w-0">
           {/* Tab bar */}
           <div className="flex border-b border-white/6 shrink-0">
-            {(['stage', 'uw', 'reminders', 'memory', 'score'] as const).map((tab) => (
+            {(['stage', 'uw', 'discovery', 'memory', 'score'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
@@ -466,7 +466,7 @@ export default function LiveCallPage() {
                     : 'text-slate-600 hover:text-slate-400'
                 }`}
               >
-                {tab === 'stage' ? 'Call Stage' : tab === 'uw' ? 'Underwriting' : tab === 'reminders' ? 'Checklist' : tab === 'memory' ? 'Memory' : 'Score'}
+                {tab === 'stage' ? 'Call Stage' : tab === 'uw' ? 'Underwriting' : tab === 'discovery' ? 'Discovery' : tab === 'memory' ? 'Memory' : 'Score'}
               </button>
             ))}
           </div>
@@ -491,10 +491,8 @@ export default function LiveCallPage() {
             {rightTab === 'uw' && (
               <UnderwritingPanel profile={underwriting} carriers={carriers} />
             )}
-            {rightTab === 'reminders' && (
-              <div className="p-3">
-                <LiveReminders items={checklist} />
-              </div>
+            {rightTab === 'discovery' && (
+              <MissedOpportunityPanel state={missedOpportunities} isAnalyzing={isAnalyzing} />
             )}
             {rightTab === 'memory' && (
               <div className="p-3 space-y-3">
