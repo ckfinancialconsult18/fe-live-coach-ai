@@ -18,6 +18,7 @@ import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
 import type { CallMetrics, TimelineEvent, TimelineEventCategory, PostCallReport as PostCallReportType } from '@/lib/types';
+import { scoreToGrade } from '@/lib/types';
 import { scoreColor } from '@/lib/score-color';
 
 let timelineEventId = 0;
@@ -637,18 +638,74 @@ function PostCallReportView({ report, transcript, loading, error, onClose }: {
       <div className="flex-1 overflow-y-auto p-6">
         {view === 'report' && (
           <div className="space-y-6">
-            {/* Score summary row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                ['Rapport', report.rapportScore ?? 0], ['Discovery', report.discoveryScore ?? 0],
-                ['Trust', report.trustScore ?? 0], ['Closing', report.closingScore ?? 0],
-              ].map(([label, val]) => (
-                <div key={label as string} className="glass-card rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold" style={{ color: scoreColor(val as number) }}>{val}</p>
-                  <p className="text-[10px] text-slate-500 mt-1">{label} Score</p>
+            {/* ── Weighted Score Breakdown ─────────────────────────────────────── */}
+            {report.weightedBreakdown ? (
+              <div className="glass-card rounded-2xl p-5 space-y-4" style={{ border: '1px solid rgba(212,175,55,0.2)' }}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-200">Weighted Score Breakdown</h3>
+                    {report.weightedBreakdown.scoreExplanation && (
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">{report.weightedBreakdown.scoreExplanation}</p>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-3xl font-extrabold" style={{ color: scoreColor(report.weightedBreakdown.overallWeighted) }}>
+                      {report.weightedBreakdown.overallWeighted}
+                    </p>
+                    <p className="text-[11px] font-semibold text-slate-400">Grade {report.weightedBreakdown.grade}</p>
+                    <p className="text-[10px] text-slate-600">{report.weightedBreakdown.confidencePct}% confidence</p>
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="space-y-2">
+                  {report.weightedBreakdown.categories.map((cat) => (
+                    <div key={cat.key}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-300 w-40">{cat.label}</span>
+                          <span className="text-[10px] text-slate-600">({Math.round(cat.weight * 100)}%)</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{
+                            color: scoreColor(cat.score),
+                            background: `${scoreColor(cat.score)}18`,
+                          }}>{cat.grade}</span>
+                          <span className="text-xs font-bold w-7 text-right" style={{ color: scoreColor(cat.score) }}>{cat.score}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${cat.score}%`, background: scoreColor(cat.score) }}
+                        />
+                      </div>
+                      {cat.explanation && (
+                        <p className="text-[10px] text-slate-600 mt-0.5 leading-tight">{cat.explanation}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {report.weightedBreakdown.reasoning && (
+                  <p className="text-[11px] text-slate-500 leading-relaxed border-t border-white/6 pt-3">
+                    {report.weightedBreakdown.reasoning}
+                  </p>
+                )}
+              </div>
+            ) : (
+              /* Score summary row — fallback when weightedBreakdown not present */
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  ['Rapport', report.rapportScore ?? 0], ['Discovery', report.discoveryScore ?? 0],
+                  ['Trust', report.trustScore ?? 0], ['Closing', report.closingScore ?? 0],
+                ].map(([label, val]) => (
+                  <div key={label as string} className="glass-card rounded-xl p-4 text-center">
+                    <p className="text-2xl font-bold" style={{ color: scoreColor(val as number) }}>{val}</p>
+                    <p className="text-[10px] text-slate-500 mt-1">{label} Score</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               {/* Quality Radar — guarded: qualityScores may be empty object when AI unavailable */}

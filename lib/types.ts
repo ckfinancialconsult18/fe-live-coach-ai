@@ -212,6 +212,65 @@ export interface TimelineEvent {
   transcriptLineId: string | null;
 }
 
+// ── Weighted Scoring (Phase 5) ───────────────────────────────────────────────
+// The overall score is computed server-side from 8 weighted categories.
+// AI returns raw category scores; the server applies fixed weights so results
+// are deterministic and cannot be hallucinated.
+
+export const SCORE_WEIGHTS: Record<string, number> = {
+  rapport:      0.15,
+  permission:   0.10,
+  discovery:    0.20,
+  health:       0.10,
+  budget:       0.10,
+  presentation: 0.15,
+  objections:   0.10,
+  closing:      0.10,
+};
+
+export const SCORE_WEIGHT_LABELS: Record<string, string> = {
+  rapport:      'Rapport Building',
+  permission:   'Permission / Warm-Up',
+  discovery:    'Discovery',
+  health:       'Health Questions',
+  budget:       'Budget Discussion',
+  presentation: 'Presentation',
+  objections:   'Objection Handling',
+  closing:      'Closing',
+};
+
+export function scoreToGrade(score: number): string {
+  if (score >= 97) return 'A+';
+  if (score >= 93) return 'A';
+  if (score >= 90) return 'A-';
+  if (score >= 87) return 'B+';
+  if (score >= 83) return 'B';
+  if (score >= 80) return 'B-';
+  if (score >= 77) return 'C+';
+  if (score >= 70) return 'C';
+  if (score >= 60) return 'D';
+  return 'Needs Improvement';
+}
+
+export interface WeightedScoreCategory {
+  key: string;
+  label: string;
+  score: number;        // 0-100 raw AI score
+  weight: number;       // fraction e.g. 0.15
+  contribution: number; // score * weight
+  grade: string;
+  explanation: string;  // AI's explanation for this score
+}
+
+export interface WeightedScoreBreakdown {
+  categories: WeightedScoreCategory[];
+  overallWeighted: number; // server-computed, 0-100
+  grade: string;
+  confidencePct: number;
+  scoreExplanation: string; // 1-2 sentence summary of the overall score
+  reasoning: string;        // deeper reasoning from AI
+}
+
 // ── Phase 3: AI Quality Score (12-dimension radar) ──────────────────────────
 export interface QualityScores {
   confidence: number;
@@ -264,6 +323,8 @@ export interface PostCallReport {
   followUpEmail: string;
   crmNotes: string;
   improvementPlan: string[];
+  /** Server-computed weighted score breakdown (Feature 1). Present when AI scoring succeeds. */
+  weightedBreakdown?: WeightedScoreBreakdown;
 }
 
 // ── CRM types ─────────────────────────────────────────────────────────────────

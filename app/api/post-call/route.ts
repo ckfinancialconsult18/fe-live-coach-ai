@@ -2,7 +2,51 @@ import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
 import { createClient } from '@/lib/supabase/server';
-import type { TranscriptLine, TimelineEvent } from '@/lib/types';
+import {
+  SCORE_WEIGHTS,
+  SCORE_WEIGHT_LABELS,
+  scoreToGrade,
+  type TranscriptLine,
+  type TimelineEvent,
+  type WeightedScoreBreakdown,
+  type WeightedScoreCategory,
+} from '@/lib/types';
+
+function computeWeightedScore(
+  categoryScores: Record<string, number>,
+  categoryExplanations: Record<string, string>,
+  scoreExplanation: string,
+  reasoning: string,
+  confidencePct: number,
+): WeightedScoreBreakdown {
+  const categories: WeightedScoreCategory[] = [];
+  let totalWeighted = 0;
+
+  for (const [key, weight] of Object.entries(SCORE_WEIGHTS)) {
+    const score = Math.max(0, Math.min(100, Math.round(categoryScores[key] ?? 50)));
+    const contribution = score * weight;
+    totalWeighted += contribution;
+    categories.push({
+      key,
+      label: SCORE_WEIGHT_LABELS[key],
+      score,
+      weight,
+      contribution: Math.round(contribution * 10) / 10,
+      grade: scoreToGrade(score),
+      explanation: categoryExplanations[key] ?? '',
+    });
+  }
+
+  const overall = Math.round(totalWeighted);
+  return {
+    categories,
+    overallWeighted: overall,
+    grade: scoreToGrade(overall),
+    confidencePct: Math.max(0, Math.min(100, Math.round(confidencePct ?? 70))),
+    scoreExplanation,
+    reasoning,
+  };
+}
 
 interface PostCallRequestBody {
   transcript: string;
@@ -141,6 +185,7 @@ async function persistScore(
       threeBiggestImprovements: report.threeBiggestImprovements ?? [],
       threeBiggestStrengths: report.threeBiggestStrengths ?? [],
       overallGrade: report.overallGrade ?? '',
+      weightedBreakdown: report.weightedBreakdown ?? null,
     },
     strengths: report.strengths ?? [],
     missed_opportunities: report.missedOpportunities ?? [],
@@ -262,6 +307,22 @@ export async function POST(req: NextRequest) {
   report.talkPct = realMetrics.talkPct;
   report.listenPct = realMetrics.listenPct;
   report.questionsAskedCount = realMetrics.questionsAskedCount;
+
+  // Server-side weighted score — overrides any overallScore the AI may have returned
+  const weightedBreakdown = computeWeightedScore(
+    report.categoryScores ?? {},
+    report.categoryExplanations ?? {},
+    report.scoreExplanation ?? '',
+    report.reasoning ?? '',
+    report.confidencePct ?? 70,
+  );
+  report.weightedBreakdown = weightedBreakdown;
+  report.overallScore = weightedBreakdown.overallWeighted;
+  report.overallGrade = weightedBreakdown.grade;
+
+  console.log('[post-call][4] weighted score — overall:', weightedBreakdown.overallWeighted,
+    '| grade:', weightedBreakdown.grade,
+    '| confidence:', weightedBreakdown.confidencePct + '%');
 
   if (persistedCallId) {
     await persistScore(supabase, user.id, persistedCallId, report, body);

@@ -145,14 +145,54 @@ export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze 
 
 Ground every claim in the actual transcript. Never invent a strength, weakness, or quote that isn't traceable to what was said.
 
+SCORING CRITERIA — score each category 0-100 based on what actually happened in the call:
+
+- rapport (0-100): Did the agent use the prospect's name, express genuine empathy, find common ground, avoid sounding robotic? 90+ = warm and natural throughout. 70-89 = decent but occasional stiffness. Below 70 = cold, transactional, or awkward.
+- permission (0-100): Did the agent ask if it was a good time, clearly state the call's purpose, and earn permission to continue? 90+ = smooth and respectful. Below 70 = assumed permission or skipped entirely.
+- discovery (0-100): Did the agent uncover WHY the prospect is interested, their family situation, existing coverage, and beneficiary intentions? 90+ = thorough and curious. 70-89 = hit the basics. Below 70 = rushed or skipped discovery.
+- health (0-100): Were the key underwriting questions asked (age, tobacco, major conditions, medications, hospitalizations)? 90+ = complete qualification. 70-89 = partial. Below 70 = no health questions or critical omissions.
+- budget (0-100): Did the agent anchor a monthly budget before presenting prices? Did they handle sticker shock if it arose? 90+ = budget anchored and confirmed. Below 70 = presented price without knowing budget.
+- presentation (0-100): Was the product explanation clear, benefit-focused, and matched to what the prospect said they needed? 90+ = crisp and tailored. Below 70 = confusing, generic, or never happened.
+- objections (0-100): Were objections addressed empathetically with a pivot, not dismissed or argued? If no objections arose, score 85 (no objections = competent neutral). 90+ = handled brilliantly. Below 70 = got flustered or gave up.
+- closing (0-100): Did the agent ask for the business or a clear next step? 90+ = confident ask with response. 70-89 = vague next step. Below 70 = never asked.
+
+Also provide:
+- scoreExplanation: 1-2 sentences summarizing overall performance in a sales manager's voice
+- reasoning: 2-3 sentences explaining the key factors that most impacted the score (both positive and negative)
+- confidencePct: 0-100, your confidence in this scoring given the transcript length and quality. Short/incomplete transcripts = lower confidence.
+
+DO NOT provide an overallScore — the server computes that from the weighted formula.
+
 Return JSON:
 {
   "summary": "3-4 sentence executive summary of the call",
-  "overallScore": 0-100,
   "rapportScore": 0-100,
   "discoveryScore": 0-100,
   "trustScore": 0-100,
   "closingScore": 0-100,
+  "categoryScores": {
+    "rapport": 0-100,
+    "permission": 0-100,
+    "discovery": 0-100,
+    "health": 0-100,
+    "budget": 0-100,
+    "presentation": 0-100,
+    "objections": 0-100,
+    "closing": 0-100
+  },
+  "categoryExplanations": {
+    "rapport": "1 sentence reason for this score",
+    "permission": "1 sentence reason",
+    "discovery": "1 sentence reason",
+    "health": "1 sentence reason",
+    "budget": "1 sentence reason",
+    "presentation": "1 sentence reason",
+    "objections": "1 sentence reason",
+    "closing": "1 sentence reason"
+  },
+  "scoreExplanation": "1-2 sentence overall summary",
+  "reasoning": "2-3 sentence deeper reasoning",
+  "confidencePct": 0-100,
   "scores": {
     "introduction": 0-100,
     "permission": 0-100,
