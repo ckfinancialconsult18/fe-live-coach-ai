@@ -342,6 +342,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const startChunkCycle = useCallback(() => {
     if (!shouldReconnectRef.current || usingWebSpeechRef.current) return;
 
+    // Bug 4 fix: guard against a second recorder being created while one is
+    // already recording (e.g. onstop fires and calls startChunkCycle while a
+    // concurrent call path already started a new cycle).
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      console.warn('[transcription] startChunkCycle — recorder already active, ignoring duplicate call');
+      return;
+    }
+
     const stream = streamRef.current;
     if (!stream) {
       console.error('[transcription] startChunkCycle — no stream');
@@ -439,6 +447,16 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   // ── Level monitor + 1s heartbeat ───────────────────────────────────────────
 
   const startMonitoring = useCallback(async (target: MediaStream) => {
+    // Bug 3 fix: teardown any existing monitor before creating a new one.
+    // Without this, a second startListening call leaks the AudioContext and
+    // leaves an orphan heartbeat interval running in parallel.
+    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+    monitorMeterRef.current?.destroy(); monitorMeterRef.current = null;
+    if (monitorCtxRef.current && monitorCtxRef.current.state !== 'closed') {
+      monitorCtxRef.current.close().catch(() => {});
+    }
+    monitorCtxRef.current = null;
+
     try {
       const mctx = new AudioContext();
       if (mctx.state === 'suspended') await mctx.resume().catch(() => {});
@@ -471,6 +489,15 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   // ── Public: startListening ──────────────────────────────────────────────────
 
   const startListening = useCallback(async (explicitStream?: MediaStream) => {
+    // Bug 1 fix: re-entrancy guard. startListening can be called a second time
+    // during the 'connecting' window because isListening is false until
+    // connectionState reaches 'connected'. Without this guard, a second click
+    // creates a second recorder, second heartbeat, and second chunk cycle.
+    if (shouldReconnectRef.current) {
+      console.warn('[transcription] startListening called while already active — ignoring duplicate call');
+      return;
+    }
+
     shouldReconnectRef.current = true;
     reconnectAttemptRef.current = 0;
     usingWebSpeechRef.current = false;
@@ -633,7 +660,10 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     partial,
     connectionState,
     transcriptionMode,
-    isListening: connectionState === 'connected' || connectionState === 'reconnecting',
+    // Bug 5 fix: include 'connecting' so the button switches to End Call the
+    // instant Start Call is pressed, closing the window where a second click
+    // could start a duplicate session before the recorder is ready.
+    isListening: connectionState === 'connected' || connectionState === 'reconnecting' || connectionState === 'connecting',
     error,
     startListening,
     stopListening,

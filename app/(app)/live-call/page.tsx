@@ -237,6 +237,11 @@ export default function LiveCallPage() {
   const autosave = useCallAutosave(getAutosavePayload);
 
   const startCall = useCallback(async () => {
+    // Bug 2 fix: clear any existing timer before creating a new one.
+    // If startCall is somehow invoked while a previous call is winding up,
+    // this prevents two setIntervals running simultaneously and leaking.
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+
     clearTranscript();
     setDuration(0);
     setPostCallReport(null);
