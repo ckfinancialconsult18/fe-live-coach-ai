@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, CarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState, ProbabilitySnapshot, LiveClosingState } from '@/lib/types';
+import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, EnhancedCarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState, ProbabilitySnapshot, LiveClosingState } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
-import { matchCarriers } from '@/lib/carrier-rules';
+import { matchCarriersEnhanced } from '@/lib/carrier-rules';
 import { computeLiveScores } from '@/lib/score-live';
 import { computeMissedOpportunities } from '@/lib/discovery-engine';
 import { getObjectionDef, OBJECTION_TYPE_LABELS } from '@/lib/objection-library';
@@ -56,6 +56,7 @@ const DEFAULT_UNDERWRITING: UnderwritingProfile = {
   tobacco: null, diabetes: null, cancer: null, copd: null, chf: null,
   stroke: null, kidneyDisease: null, oxygen: null, walker: null, wheelchair: null,
   hospitalizations: '', currentMedications: '', surgeries: '',
+  heartAttack: null, dialysis: null, dui: null, felony: null, bankruptcy: null, veteran: null,
 };
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
@@ -72,7 +73,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [insight, setInsight] = useState<CoachInsight>(DEFAULT_INSIGHT);
   const [stage, setStage] = useState<CallStage>('introduction');
   const [underwriting, setUnderwriting] = useState<UnderwritingProfile>(DEFAULT_UNDERWRITING);
-  const [carriers, setCarriers] = useState<CarrierMatch[]>([]);
+  const [carriers, setCarriers] = useState<EnhancedCarrierMatch[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>(DEFAULT_CHECKLIST);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [memory, setMemory] = useState<CallMemory>(EMPTY_CALL_MEMORY);
@@ -256,7 +257,13 @@ export function useAICoach(transcript: TranscriptLine[]) {
         if (u.hospitalizations)   next.hospitalizations = u.hospitalizations as string;
         if (u.currentMedications) next.currentMedications = u.currentMedications as string;
         if (u.surgeries)          next.surgeries = u.surgeries as string;
-        setCarriers(matchCarriers(next));
+        if (u.heartAttack !== null && u.heartAttack !== undefined) next.heartAttack = u.heartAttack as boolean;
+        if (u.dialysis !== null && u.dialysis !== undefined)   next.dialysis = u.dialysis as boolean;
+        if (u.dui !== null && u.dui !== undefined)             next.dui = u.dui as boolean;
+        if (u.felony !== null && u.felony !== undefined)       next.felony = u.felony as boolean;
+        if (u.bankruptcy !== null && u.bankruptcy !== undefined) next.bankruptcy = u.bankruptcy as boolean;
+        if (u.veteran !== null && u.veteran !== undefined)     next.veteran = u.veteran as boolean;
+        setCarriers(matchCarriersEnhanced(next));
         return next;
       });
     }

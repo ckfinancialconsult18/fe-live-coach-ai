@@ -231,8 +231,22 @@ Return JSON with these exact fields (use null for unknown):
   "wheelchair": boolean | null,
   "hospitalizations": string | null,
   "currentMedications": string | null,
-  "surgeries": string | null
-}`;
+  "surgeries": string | null,
+  "heartAttack": boolean | null,
+  "dialysis": boolean | null,
+  "dui": boolean | null,
+  "felony": boolean | null,
+  "bankruptcy": boolean | null,
+  "veteran": boolean | null
+}
+
+Field extraction guidance:
+- heartAttack: true if they mention "heart attack", "myocardial infarction", or "MI"
+- dialysis: true if they mention dialysis or kidney failure requiring dialysis
+- dui: true if they mention DUI, DWI, or drunk driving conviction in last 5 years
+- felony: true if they mention a felony conviction
+- bankruptcy: true if they mention filing for bankruptcy in last 2 years
+- veteran: true if they mention being a veteran, military service, or VA benefits`;
 
 export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze this complete call transcript and generate a comprehensive post-call report. You will also be given the agent's actual talk/listen percentages and question count, computed deterministically from the transcript — use those numbers as given, do not recompute or contradict them.
 

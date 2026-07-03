@@ -5,7 +5,7 @@ import { LiveTranscript } from '@/components/live-call/LiveTranscript';
 import { AICoachPanel } from '@/components/live-call/AICoachPanel';
 import { CallStagePanel } from '@/components/live-call/CallStagePanel';
 import { MetricsPanel } from '@/components/live-call/MetricsPanel';
-import { UnderwritingPanel } from '@/components/live-call/UnderwritingPanel';
+import { LiveCarrierPanel } from '@/components/live-call/LiveCarrierPanel';
 import { QuickObjectionBar } from '@/components/live-call/QuickObjectionBar';
 import { CallMetricsBar } from '@/components/live-call/CallMetricsBar';
 import { MicrophoneControls } from '@/components/live-call/MicrophoneControls';
@@ -515,7 +515,7 @@ export default function LiveCallPage() {
               </div>
             )}
             {rightTab === 'uw' && (
-              <UnderwritingPanel profile={underwriting} carriers={carriers} />
+              <LiveCarrierPanel carriers={carriers} underwriting={underwriting} />
             )}
             {rightTab === 'discovery' && (
               <MissedOpportunityPanel state={missedOpportunities} isAnalyzing={isAnalyzing} />

@@ -210,11 +210,13 @@ export interface CoachInsight {
 }
 
 export interface UnderwritingProfile {
+  // Demographics
   age: string;
   gender: string;
   heightFt: string;
   heightIn: string;
   weight: string;
+  // Core medical conditions (original)
   tobacco: boolean | null;
   diabetes: boolean | null;
   cancer: boolean | null;
@@ -228,9 +230,33 @@ export interface UnderwritingProfile {
   hospitalizations: string;
   currentMedications: string;
   surgeries: string;
+  // Extended underwriting factors (Feature 6)
+  heartAttack?: boolean | null;   // prior heart attack
+  dialysis?: boolean | null;      // currently on dialysis
+  dui?: boolean | null;           // DUI in past 5 years
+  felony?: boolean | null;        // felony conviction
+  bankruptcy?: boolean | null;    // bankruptcy in past 2 years
+  veteran?: boolean | null;       // military veteran status
 }
 
 export type UnderwritingClass = 'preferred' | 'standard' | 'graded' | 'modified' | 'guaranteed';
+
+export type ApprovalLikelihood = 'very_high' | 'high' | 'moderate' | 'low' | 'decline';
+
+export interface EnhancedCarrierMatch extends CarrierMatch {
+  fitPct: number;
+  approvalLikelihood: ApprovalLikelihood;
+  reasons: string[];
+  concerns: string[];
+  missingForDecision: string[];
+}
+
+export interface MissingUnderwritingQuestion {
+  field: string;
+  label: string;
+  question: string;
+  priority: 'critical' | 'high' | 'normal';
+}
 export type DeclineRisk = 'low' | 'medium' | 'high';
 
 export interface CarrierMatch {
