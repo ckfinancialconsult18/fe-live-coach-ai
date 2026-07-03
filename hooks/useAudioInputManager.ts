@@ -33,16 +33,31 @@ export interface AudioInputManagerState {
   rebuild: () => void;
 }
 
-// ── AudioContext singleton ────────────────────────────────────────────────────
-// Reuse a single context across rebuilds to avoid hitting browser limits.
+// ── Diagnostics ───────────────────────────────────────────────────────────────
+// Muted tracks are the primary cause of silent chunks: the OS has handed the
+// audio device to another app (phone call, FaceTime, Bluetooth call mode).
+// The MediaRecorder keeps producing chunks but they contain silence.
 
-let sharedCtx: AudioContext | null = null;
+const diagnosedTracks = new WeakSet<MediaStreamTrack>();
 
-function getAudioContext(): AudioContext {
-  if (!sharedCtx || sharedCtx.state === 'closed') {
-    sharedCtx = new AudioContext();
-  }
-  return sharedCtx;
+function trackInfo(t: MediaStreamTrack): string {
+  return `label="${t.label}" readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`;
+}
+
+function attachTrackDiagnostics(track: MediaStreamTrack, label: string) {
+  if (diagnosedTracks.has(track)) return;
+  diagnosedTracks.add(track);
+  track.addEventListener('mute', () => {
+    console.warn(`[AudioInputManager] TRACK MUTED (${label}) — OS stopped delivering audio. ` +
+      `Typical cause: another app (phone/FaceTime/VoIP) took the input device or a Bluetooth ` +
+      `headset switched to call mode. MediaRecorder will produce SILENT chunks. ${trackInfo(track)}`);
+  });
+  track.addEventListener('unmute', () => {
+    console.log(`[AudioInputManager] track unmuted (${label}) — audio delivery resumed. ${trackInfo(track)}`);
+  });
+  track.addEventListener('ended', () => {
+    console.error(`[AudioInputManager] TRACK ENDED (${label}) — device disconnected or capture revoked. ${trackInfo(track)}`);
+  });
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -54,7 +69,7 @@ export function useAudioInputManager(mic: UseMicrophoneReturn): AudioInputManage
 
   const micRef = useRef(mic);
   const speakerStreamRef = useRef<MediaStream | null>(null);
-  const destRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const mergeCtxRef = useRef<AudioContext | null>(null);
 
   useEffect(() => { micRef.current = mic; }, [mic]);
 
@@ -68,10 +83,18 @@ export function useAudioInputManager(mic: UseMicrophoneReturn): AudioInputManage
       return;
     }
 
-    const speakerStream = speakerStreamRef.current;
+    // Attach diagnostics to any new mic tracks
+    micStream.getAudioTracks().forEach((t, i) => attachTrackDiagnostics(t, `mic[${i}]`));
 
-    if (!speakerStream || speakerStream.getAudioTracks().every((t) => t.readyState !== 'live')) {
+    const speakerStream = speakerStreamRef.current;
+    const speakerLive = speakerStream?.getAudioTracks().some((t) => t.readyState === 'live') ?? false;
+
+    if (!speakerLive) {
       // Mic-only — no Web Audio overhead needed
+      if (mergeCtxRef.current && mergeCtxRef.current.state !== 'closed') {
+        mergeCtxRef.current.close().catch(() => {});
+      }
+      mergeCtxRef.current = null;
       setStream(micStream);
       setActiveModes(['microphone']);
       console.log('[AudioInputManager] stream: mic-only');
@@ -79,18 +102,36 @@ export function useAudioInputManager(mic: UseMicrophoneReturn): AudioInputManage
     }
 
     // Mic + system audio — merge via Web Audio API
-    const ctx = getAudioContext();
-    const dest = ctx.createMediaStreamDestination();
-    destRef.current = dest;
+    // Always create a fresh context to avoid the suspended-context silent-output bug.
+    if (mergeCtxRef.current && mergeCtxRef.current.state !== 'closed') {
+      mergeCtxRef.current.close().catch(() => {});
+    }
+    const ctx = new AudioContext();
+    mergeCtxRef.current = ctx;
 
-    const micSource = ctx.createMediaStreamSource(micStream);
-    const sysSource = ctx.createMediaStreamSource(speakerStream);
-    micSource.connect(dest);
-    sysSource.connect(dest);
+    ctx.onstatechange = () => {
+      console.warn(`[AudioInputManager] merge AudioContext state → ${ctx.state}` +
+        (ctx.state !== 'running' ? ' — merged stream is SILENT until running again' : ''));
+    };
+
+    const dest = ctx.createMediaStreamDestination();
+    ctx.createMediaStreamSource(micStream).connect(dest);
+    ctx.createMediaStreamSource(speakerStream!).connect(dest);
+
+    // Resume before callers start recording — a suspended context outputs silence.
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => {
+        console.log('[AudioInputManager] merge AudioContext resumed — state:', ctx.state);
+      }).catch((err) => {
+        console.error('[AudioInputManager] merge AudioContext resume() failed:', err);
+      });
+    }
+
+    speakerStream!.getAudioTracks().forEach((t, i) => attachTrackDiagnostics(t, `speaker[${i}]`));
 
     setStream(dest.stream);
     setActiveModes(['microphone', 'speaker-mode']);
-    console.log('[AudioInputManager] stream: mic + speaker-mode merged');
+    console.log('[AudioInputManager] stream: mic + speaker-mode merged | AudioContext state:', ctx.state);
   }, []);
 
   // Rebuild whenever the mic stream changes (e.g. device switch mid-call)
@@ -136,7 +177,6 @@ export function useAudioInputManager(mic: UseMicrophoneReturn): AudioInputManage
       setWarning(null);
       rebuild();
     } catch (err) {
-      // NotAllowedError = user cancelled the picker — not an error worth surfacing
       const name = err instanceof Error ? err.name : '';
       if (name === 'NotAllowedError') {
         setWarning('System audio not shared — only your microphone will be transcribed.');
@@ -165,7 +205,11 @@ export function useAudioInputManager(mic: UseMicrophoneReturn): AudioInputManage
       speakerStreamRef.current.getTracks().forEach((t) => t.stop());
       speakerStreamRef.current = null;
     }
-    destRef.current = null;
+    if (mergeCtxRef.current && mergeCtxRef.current.state !== 'closed') {
+      mergeCtxRef.current.onstatechange = null;
+      mergeCtxRef.current.close().catch(() => {});
+    }
+    mergeCtxRef.current = null;
     setStream(null);
     setActiveModes([]);
     setWarning(null);
