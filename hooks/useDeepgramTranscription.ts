@@ -38,19 +38,18 @@ export interface UseDeepgramTranscriptionReturn {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Sent as x-pipeline-version with every chunk so server logs identify the bundle.
-const PIPELINE_VERSION = 'timeslice-v1';
+const PIPELINE_VERSION = 'stop-restart-v2';
 
 const MAX_RECONNECT = 5;
-// MediaRecorder timeslice interval — ondataavailable fires this often.
-// The recorder runs for the entire call; we never manually stop it.
+// How long each recording segment runs. Each stop+start cycle produces a
+// complete, self-contained WebM file that Deepgram can decode as-is.
 const CHUNK_INTERVAL_MS = 4000;
-const MIN_CHUNK_BYTES = 500;
+// Minimum blob size to bother uploading (avoids POSTing empty/header-only blobs).
+const MIN_CHUNK_BYTES = 1000;
+// RMS peak below this across a whole chunk → the chunk contained only silence.
 const SILENCE_PEAK_THRESHOLD = 0.01;
+// How many consecutive silent chunks before we surface a warning to the user.
 const SILENCE_WARNING_CHUNKS = 2;
-
-// WebM Cluster EBML element ID — marks the start of encoded audio data.
-// Everything before the first Cluster is the initialization segment (header).
-const CLUSTER_ID = [0x1F, 0x43, 0xB6, 0x75];
 
 let lineSeq = 0;
 function nextId() { return `dg-${++lineSeq}`; }
@@ -84,36 +83,6 @@ function bestMimeType(): string {
   return candidates.find(
     (t) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)
   ) ?? '';
-}
-
-/**
- * Scans the first ondataavailable blob for the WebM Cluster element (1F 43 B6 75).
- * Returns a slice of the buffer containing only the initialization segment
- * (EBML header + Tracks), with no audio data.
- *
- * Why: MediaRecorder timeslice emits the EBML header only in the FIRST chunk.
- * Subsequent chunks contain raw Cluster elements that Deepgram cannot decode
- * without the header. Prepending this init segment to every subsequent chunk
- * makes each POST a valid, standalone WebM file.
- */
-async function extractInitSegment(blob: Blob): Promise<ArrayBuffer> {
-  const buf = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  for (let i = 0; i <= bytes.length - 4; i++) {
-    if (
-      bytes[i]   === CLUSTER_ID[0] &&
-      bytes[i+1] === CLUSTER_ID[1] &&
-      bytes[i+2] === CLUSTER_ID[2] &&
-      bytes[i+3] === CLUSTER_ID[3]
-    ) {
-      console.log(`[transcription] init segment found at offset ${i} — ${i} header bytes + ${buf.byteLength - i} audio bytes`);
-      return buf.slice(0, i);
-    }
-  }
-  // No Cluster found — entire blob may be header-only (some browsers emit a
-  // zero-length first chunk). Return the whole buffer.
-  console.warn('[transcription] no Cluster found in first chunk — using full blob as init segment');
-  return buf;
 }
 
 // ── Web Speech API shim ───────────────────────────────────────────────────────
@@ -155,20 +124,29 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   const audioManager = useAudioInputManager(mic);
 
-  // ── CRITICAL: route audioManager through a ref ────────────────────────────
-  // audioManager is a new object every render (its state values change).
-  // If stopListening/startListening close over audioManager directly they
-  // become new functions on every render, which triggers their useEffect
-  // cleanup → stopListening() → recorder.stop() after ~5ms.
-  // Using a ref breaks the dependency chain entirely.
+  // ── Route audioManager and mic through refs ────────────────────────────────
+  //
+  // CRITICAL: audioManager is a new object on every render (its stream/warning
+  // state changes). If stopListening or startChunkCycle close over audioManager
+  // directly they become new functions every render. The old code had:
+  //   useEffect(() => () => stopListening(), [stopListening])
+  // which fired its cleanup on EVERY stopListening identity change — stopping
+  // the recorder milliseconds after it started (the "5ms stop" bug).
+  //
+  // Fix: access audioManager through audioManagerRef so both stopListening and
+  // startChunkCycle have [] deps and are permanently stable.
   const audioManagerRef = useRef(audioManager);
   useEffect(() => { audioManagerRef.current = audioManager; }, [audioManager]);
 
   const micRef = useRef(mic);
   useEffect(() => { micRef.current = mic; }, [mic]);
 
+  // ── Recorder state (all refs — no React state for recording machinery) ──────
   const recorderRef = useRef<MediaRecorder | null>(null);
   const speechRef = useRef<SpeechRecognitionInstance | null>(null);
+  // Timer that calls recorder.stop() after CHUNK_INTERVAL_MS.
+  // Only stopListening() (End Call) clears this without scheduling a restart.
+  const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
   const reconnectAttemptRef = useRef(0);
@@ -176,11 +154,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const chunkSeqRef = useRef(0);
   const consecutiveSilentChunksRef = useRef(0);
 
-  // WebM init segment — extracted from the first ondataavailable blob and
-  // prepended to all subsequent blobs so each POST is a valid standalone file.
-  const initSegmentRef = useRef<ArrayBuffer | null>(null);
-
-  // Stream currently being recorded (stable ref, updated via effect).
+  // The stream currently being recorded. Updated when the audio manager rebuilds
+  // (e.g. speaker-mode acquired, device switch mid-call).
   const streamRef = useRef<MediaStream | null>(null);
   useEffect(() => { streamRef.current = audioManager.stream; }, [audioManager.stream]);
 
@@ -190,8 +165,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const rmsWindowRef = useRef({ sum: 0, peak: 0, n: 0 });
 
-  // Stable ref to sendChunk so ondataavailable doesn't capture a stale closure
+  // Stable function refs so MediaRecorder callbacks never close over stale values.
   const sendChunkRef = useRef<(blob: Blob, seq: number, elapsed: number) => Promise<void>>(async () => {});
+  const startChunkCycleRef = useRef<() => void>(() => {});
   const startWebSpeechRef = useRef<() => void>(() => {});
 
   const addLine = useCallback((text: string, speaker: 'agent' | 'prospect', confidence: number) => {
@@ -267,15 +243,36 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   // ── Send chunk to Deepgram via server ───────────────────────────────────────
 
   const sendChunk = useCallback(async (blob: Blob, seq: number, elapsedMs: number) => {
+    // Strip codec params: "audio/webm;codecs=opus" → "audio/webm"
     const contentType = (blob.type || 'audio/webm').split(';')[0].trim();
-    console.log(`[transcription] chunk #${seq} POSTing — size=${blob.size} elapsedMs=${elapsedMs} contentType=${contentType}`);
 
-    // Verify EBML header is present before sending.
-    void blob.slice(0, 4).arrayBuffer().then((head) => {
+    // Log first 32 bytes in hex so server logs show if the EBML header is present.
+    void blob.slice(0, 32).arrayBuffer().then((head) => {
       const hex = Array.from(new Uint8Array(head)).map((x) => x.toString(16).padStart(2, '0')).join(' ');
-      console.log(`[transcription] chunk #${seq} header bytes: ${hex}` +
-        (hex === '1a 45 df a3' ? ' (valid WebM/EBML ✓)' : ' ← NOT a valid WebM header ✗'));
+      const isWebM = hex.startsWith('1a 45 df a3');
+      const isOgg  = hex.startsWith('4f 67 67 53');
+      const valid  = isWebM || isOgg;
+      console.log(
+        `[transcription] chunk #${seq} header: ${hex.slice(0, 47)}…` +
+        ` | ${valid ? (isWebM ? 'valid WebM/EBML ✓' : 'valid Ogg ✓') : 'UNKNOWN FORMAT ✗ — Deepgram will reject this'}`
+      );
+      if (!valid) {
+        console.error(`[transcription] chunk #${seq} INVALID — raw bytes are not WebM or Ogg. ` +
+          `blob.type=${blob.type} blob.size=${blob.size} elapsedMs=${elapsedMs}`);
+      }
     });
+
+    console.log(`[transcription] chunk #${seq} uploading — size=${blob.size} elapsedMs=${Math.round(elapsedMs)} contentType=${contentType} pipeline=${PIPELINE_VERSION}`);
+
+    if (blob.size < MIN_CHUNK_BYTES) {
+      console.warn(`[transcription] chunk #${seq} too small (${blob.size} < ${MIN_CHUNK_BYTES} bytes) — skipping upload`);
+      return;
+    }
+
+    if (elapsedMs < 1000) {
+      console.warn(`[transcription] chunk #${seq} duration too short (${Math.round(elapsedMs)}ms < 1000ms) — skipping upload`);
+      return;
+    }
 
     try {
       const res = await fetch('/api/transcribe', {
@@ -288,7 +285,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         body: blob,
       });
 
-      console.log(`[transcription] chunk #${seq} responded — HTTP ${res.status}`);
+      console.log(`[transcription] chunk #${seq} response — HTTP ${res.status}`);
 
       if (res.status === 503) {
         console.warn('[transcription] Deepgram not configured (503) — falling back to Web Speech API');
@@ -322,32 +319,38 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   useEffect(() => { sendChunkRef.current = sendChunk; }, [sendChunk]);
 
-  // ── MediaRecorder setup ──────────────────────────────────────────────────────
+  // ── Stop/restart chunk cycle ────────────────────────────────────────────────
   //
-  // We use recorder.start(CHUNK_INTERVAL_MS) — timeslice mode. The recorder
-  // runs for the ENTIRE call. ondataavailable fires every CHUNK_INTERVAL_MS.
-  // stop() is called ONLY in stopListening() when End Call is pressed.
+  // WHY stop/restart instead of timeslice:
   //
-  // WebM timeslice problem: the EBML initialization segment (codec info, track
-  // layout) appears only in the FIRST ondataavailable blob. Subsequent blobs
-  // contain raw Cluster elements — Deepgram cannot decode them without the header.
+  // MediaRecorder.start(N) (timeslice): ondataavailable fires every N ms but
+  // each blob is a *streaming WebM fragment* — the Segment element size is set
+  // to "unknown" (01 FF FF FF FF FF FF FF) and each blob is an incomplete file.
+  // Deepgram's pre-recorded REST API requires a *complete* audio file and rejects
+  // these fragments with HTTP 400 "corrupt or unsupported data".
   //
-  // Fix: extract the init segment from the first blob by scanning for the
-  // Cluster element ID (1F 43 B6 75). Prepend that init segment to every
-  // subsequent blob. Each POST then starts with a valid EBML header and is a
-  // standalone decodable WebM file.
+  // MediaRecorder.start() + stop(): each cycle produces a *complete, self-
+  // contained WebM file* with a proper header and terminated Segment. Deepgram
+  // decodes these reliably. The cost is a new MediaRecorder instance per chunk —
+  // that's fine; the overhead is negligible compared to the 4s cycle time.
+  //
+  // The previous version used stop/restart but the React cleanup loop was firing
+  // stopListening() after 5ms (stopListening depended on [audioManager] which
+  // changed on every render). That is fixed by routing audioManager through a
+  // ref so stopListening has [] deps and is permanently stable.
 
-  const startRecorder = useCallback((stream: MediaStream) => {
-    const tracks = stream.getAudioTracks();
-    tracks.forEach((t, i) => {
-      console.log(`[transcription] track[${i}] label="${t.label}" readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`);
-    });
+  const startChunkCycle = useCallback(() => {
+    if (!shouldReconnectRef.current || usingWebSpeechRef.current) return;
 
-    const liveTracks = tracks.filter((t) => t.readyState === 'live');
+    const stream = streamRef.current;
+    if (!stream) {
+      console.error('[transcription] startChunkCycle — no stream');
+      return;
+    }
+
+    const liveTracks = stream.getAudioTracks().filter((t) => t.readyState === 'live');
     if (liveTracks.length === 0) {
-      console.error('[transcription] all audio tracks ended — cannot record');
-      setConnectionState('failed');
-      setError('Microphone disconnected. Please check your audio device.');
+      console.error('[transcription] startChunkCycle — all tracks ended');
       return;
     }
 
@@ -356,45 +359,41 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     try {
       recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[transcription] MediaRecorder constructor threw:', msg);
-      setError(`Could not start recording: ${msg}`);
-      setConnectionState('failed');
+      console.error('[transcription] MediaRecorder constructor threw:', err instanceof Error ? err.message : err);
       return;
     }
 
     recorderRef.current = recorder;
-    initSegmentRef.current = null;
-    chunkSeqRef.current = 0;
+
+    const seq = ++chunkSeqRef.current;
+    const chunks: Blob[] = [];
+    const startedAt = performance.now();
+
+    console.log(`[transcription] chunk #${seq} ===== MediaRecorder.start() ===== mimeType=${recorder.mimeType} pipeline=${PIPELINE_VERSION}`);
 
     recorder.ondataavailable = (e) => {
-      if (!shouldReconnectRef.current || usingWebSpeechRef.current) return;
+      if (e.data.size > 0) chunks.push(e.data);
+    };
 
-      const seq = ++chunkSeqRef.current;
-      const now = performance.now();
+    recorder.onstop = () => {
+      const elapsed = performance.now() - startedAt;
+      const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
 
-      console.log(`[transcription] chunk #${seq} ondataavailable — size=${e.data.size} state=${recorder.state}`);
+      console.log(`[transcription] chunk #${seq} onstop — elapsed=${Math.round(elapsed)}ms blob.size=${blob.size} blob.type=${blob.type}`);
 
-      if (e.data.size < MIN_CHUNK_BYTES) {
-        console.warn(`[transcription] chunk #${seq} too small (${e.data.size} bytes) — skipping`);
-        return;
-      }
-
-      // RMS snapshot for this chunk
+      // RMS snapshot for this chunk window
       const { sum, peak, n } = rmsWindowRef.current;
       const avgRms = n > 0 ? sum / n : -1;
-      rmsWindowRef.current = { sum: 0, peak: 0, n: 0 }; // reset for next window
+      rmsWindowRef.current = { sum: 0, peak: 0, n: 0 };
 
       console.log(`[transcription] chunk #${seq} RMS: avg=${avgRms.toFixed(4)} peak=${peak.toFixed(4)} samples=${n}`);
 
       // Silence detection
+      const tracks = stream.getAudioTracks();
       if (n > 0 && peak < SILENCE_PEAK_THRESHOLD) {
         consecutiveSilentChunksRef.current += 1;
-        const states = tracks.map((t, i) =>
-          `track[${i}]: readyState=${t.readyState} muted=${t.muted}`
-        ).join(' | ');
-        console.warn(`[transcription] chunk #${seq} SILENT (peakRMS=${peak.toFixed(4)}) ` +
-          `consecutive=${consecutiveSilentChunksRef.current} | ${states}`);
+        const states = tracks.map((t, i) => `track[${i}]: readyState=${t.readyState} muted=${t.muted}`).join(' | ');
+        console.warn(`[transcription] chunk #${seq} SILENT peakRMS=${peak.toFixed(4)} consecutive=${consecutiveSilentChunksRef.current} | ${states}`);
         if (consecutiveSilentChunksRef.current >= SILENCE_WARNING_CHUNKS) {
           const mutedTracks = tracks.filter((t) => t.muted);
           setSilenceWarning(mutedTracks.length > 0
@@ -410,51 +409,32 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         consecutiveSilentChunksRef.current = 0;
       }
 
-      if (seq === 1) {
-        // First chunk: contains EBML header + first N seconds of audio.
-        // Extract and save the init segment (header only, up to first Cluster).
-        // Send the full first blob as-is — it's already a valid standalone file.
-        extractInitSegment(e.data).then((initSeg) => {
-          initSegmentRef.current = initSeg;
-          void sendChunkRef.current(e.data, seq, now);
-        });
-      } else {
-        // Subsequent chunks: raw Cluster elements, no header.
-        // Prepend saved init segment so Deepgram can decode independently.
-        const init = initSegmentRef.current;
-        const fullBlob = init
-          ? new Blob([init, e.data], { type: recorder.mimeType || 'audio/webm' })
-          : e.data;
+      // Upload the completed chunk
+      void sendChunkRef.current(blob, seq, elapsed);
 
-        if (!init) {
-          console.warn(`[transcription] chunk #${seq} — init segment not yet available, sending raw chunk`);
-        }
-
-        void sendChunkRef.current(fullBlob, seq, now);
+      // Schedule next cycle — only if shouldReconnect is still true
+      // (stopListening sets it false so this never fires after End Call)
+      if (shouldReconnectRef.current) {
+        startChunkCycleRef.current();
       }
-    };
-
-    recorder.onstop = () => {
-      console.log('[transcription] MediaRecorder stopped');
     };
 
     recorder.onerror = (e: Event) => {
       console.error('[transcription] MediaRecorder.onerror:', e);
     };
 
-    try {
-      // Timeslice: ondataavailable fires every CHUNK_INTERVAL_MS automatically.
-      // The recorder runs until stop() is explicitly called.
-      recorder.start(CHUNK_INTERVAL_MS);
-      console.log(`[transcription] ===== MediaRecorder running =====`,
-        `mimeType=${recorder.mimeType} timeslice=${CHUNK_INTERVAL_MS}ms pipeline=${PIPELINE_VERSION}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[transcription] MediaRecorder.start() threw:', msg);
-      setError(`Could not start recording: ${msg}`);
-      setConnectionState('failed');
-    }
-  }, []);
+    recorder.start();
+
+    // Schedule this chunk's stop. stopListening() cancels this timer (End Call path).
+    chunkTimerRef.current = setTimeout(() => {
+      console.log(`[transcription] chunk #${seq} timer fired — calling stop() after ${CHUNK_INTERVAL_MS}ms`);
+      if (recorderRef.current?.state === 'recording') {
+        recorderRef.current.stop();
+      }
+    }, CHUNK_INTERVAL_MS);
+  }, []); // [] — no React state deps; reads everything through stable refs
+
+  useEffect(() => { startChunkCycleRef.current = startChunkCycle; }, [startChunkCycle]);
 
   // ── Level monitor + 1s heartbeat ───────────────────────────────────────────
 
@@ -495,6 +475,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     reconnectAttemptRef.current = 0;
     usingWebSpeechRef.current = false;
     consecutiveSilentChunksRef.current = 0;
+    chunkSeqRef.current = 0;
 
     if (typeof window === 'undefined' || !window.MediaRecorder) {
       console.warn('[transcription] MediaRecorder unavailable — using Web Speech API');
@@ -531,14 +512,10 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       if (s.echoCancellation) {
         console.warn('[transcription] ⚠ echoCancellation=true — the browser will erase speakerphone audio as echo');
       }
-      if (s.noiseSuppression) {
-        console.warn('[transcription] ⚠ noiseSuppression=true — far-field audio (phone through speakers) will be attenuated');
-      }
     }
 
-    // Rebuild AudioInputManager so it picks up the latest mic stream.
-    // We read audioManager through a ref (audioManagerRef) so this rebuild
-    // does NOT cause stopListening to recreate and fire as cleanup.
+    // Rebuild via ref so this rebuild does NOT cause stopListening to
+    // recreate (audioManagerRef.current has no impact on deps).
     audioManagerRef.current.rebuild();
     const recordingStream = audioManagerRef.current.stream ?? rawStream;
     streamRef.current = recordingStream;
@@ -547,16 +524,38 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
     setConnectionState('connected');
     setTranscriptionMode('deepgram');
-    startRecorder(recordingStream);
-  }, [startMonitoring, startRecorder]);
+
+    // Start the first chunk cycle. Subsequent cycles are self-scheduling
+    // via onstop until shouldReconnectRef becomes false (End Call).
+    startChunkCycleRef.current();
+  }, [startMonitoring]); // startChunkCycle accessed via ref — not a dep
 
   // ── Public: stopListening ───────────────────────────────────────────────────
-  // No deps that change on re-render — stable function identity across renders.
+  //
+  // MUST have [] deps. If it depended on audioManager (a new object every
+  // render) it would be recreated on every render, which caused the old
+  // useEffect cleanup to fire stopListening() after ~5ms.
 
   const stopListening = useCallback(() => {
+    console.log('[transcription] stopListening() — End Call');
     shouldReconnectRef.current = false;
-    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+
+    // Cancel the in-flight chunk timer. Without this the timer fires,
+    // recorder.stop() runs, onstop uploads the partial chunk, and then
+    // startChunkCycle would restart (but shouldReconnect=false prevents that).
+    // Cancelling here just avoids the extraneous partial-chunk upload.
+    if (chunkTimerRef.current) {
+      clearTimeout(chunkTimerRef.current);
+      chunkTimerRef.current = null;
+    }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
 
     monitorMeterRef.current?.destroy();
     monitorMeterRef.current = null;
@@ -567,7 +566,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
     if (recorderRef.current) {
       if (recorderRef.current.state !== 'inactive') {
-        console.log('[transcription] stop() called — End Call pressed');
+        console.log('[transcription] stopping active recorder for final chunk');
         recorderRef.current.stop();
       }
       recorderRef.current = null;
@@ -579,10 +578,10 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       speechRef.current = null;
     }
 
-    audioManagerRef.current.releaseAll();
+    audioManagerRef.current.releaseAll(); // uses ref — no audioManager dep
     setConnectionState('idle');
     setPartial(null);
-  }, []); // ← no deps: stable across all renders
+  }, []); // ← permanently stable — never recreated
 
   const clearTranscript = useCallback(() => {
     setTranscript([]);
@@ -610,26 +609,21 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         console.error('[transcription] re-acquire failed:', micRef.current.error);
         return;
       }
-      console.log('[transcription] re-acquire succeeded — restarting recorder');
+      console.log('[transcription] re-acquire succeeded — rebuilding stream');
       audioManagerRef.current.rebuild();
-      const recordingStream = audioManagerRef.current.stream ?? newStream;
-      streamRef.current = recordingStream;
-      // Stop the current recorder cleanly, then start fresh.
-      if (recorderRef.current?.state !== 'inactive') {
-        recorderRef.current?.stop();
-      }
-      recorderRef.current = null;
-      startRecorder(recordingStream);
+      streamRef.current = audioManagerRef.current.stream ?? newStream;
+      // The current chunk cycle will finish naturally; onstop calls
+      // startChunkCycle which picks up the new streamRef.current.
     }).catch((err) => {
       console.error('[transcription] re-acquire threw:', err instanceof Error ? err.message : err);
     });
-  }, [mic.health, startRecorder]);
+  }, [mic.health]);
 
   // ── Cleanup on unmount only ─────────────────────────────────────────────────
-  // IMPORTANT: the deps array is intentionally empty.
-  // stopListening is stable (no changing deps), so this ref trick is not strictly
-  // necessary — but using an explicit ref guarantees that even if stopListening
-  // ever gains deps, the cleanup never fires on re-renders, only on unmount.
+  //
+  // [] deps: fires ONLY when the component unmounts, never on re-renders.
+  // stopListening is stable ([] deps above) so the ref indirection here is
+  // redundant — kept for belt-and-suspenders safety.
   const stopListeningRef = useRef(stopListening);
   useEffect(() => { stopListeningRef.current = stopListening; }, [stopListening]);
   useEffect(() => () => { stopListeningRef.current(); }, []); // unmount only
