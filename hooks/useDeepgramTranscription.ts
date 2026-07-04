@@ -43,7 +43,9 @@ const PIPELINE_VERSION = 'stop-restart-v2';
 const MAX_RECONNECT = 5;
 // How long each recording segment runs. Each stop+start cycle produces a
 // complete, self-contained WebM file that Deepgram can decode as-is.
-const CHUNK_INTERVAL_MS = 4000;
+// 2 s gives a good balance: short enough for fast final transcripts,
+// long enough for reliable diarization.
+const CHUNK_INTERVAL_MS = 2000;
 // Minimum blob size to bother uploading (avoids POSTing empty/header-only blobs).
 const MIN_CHUNK_BYTES = 1000;
 // RMS peak below this across a whole chunk → the chunk contained only silence.
@@ -144,6 +146,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   // ── Recorder state (all refs — no React state for recording machinery) ──────
   const recorderRef = useRef<MediaRecorder | null>(null);
   const speechRef = useRef<SpeechRecognitionInstance | null>(null);
+  // Runs in parallel with Deepgram to provide real-time interim partials.
+  // Never adds final lines — Deepgram owns those.
+  const parallelSpeechRef = useRef<SpeechRecognitionInstance | null>(null);
   // Timer that calls recorder.stop() after CHUNK_INTERVAL_MS.
   // Only stopListening() (End Call) clears this without scheduling a restart.
   const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,6 +174,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const sendChunkRef = useRef<(blob: Blob, seq: number, elapsed: number) => Promise<void>>(async () => {});
   const startChunkCycleRef = useRef<() => void>(() => {});
   const startWebSpeechRef = useRef<() => void>(() => {});
+  const startParallelWebSpeechRef = useRef<() => void>(() => {});
 
   const addLine = useCallback((text: string, speaker: 'agent' | 'prospect', confidence: number) => {
     if (!text.trim()) return;
@@ -240,27 +246,81 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   useEffect(() => { startWebSpeechRef.current = startWebSpeech; }, [startWebSpeech]);
 
+  // ── Parallel Web Speech — real-time partials while Deepgram records ─────────
+  // Runs alongside the MediaRecorder cycle. Only sets partial state (never adds
+  // final lines) so Deepgram's higher-accuracy finals supersede it cleanly.
+  // Auto-restarts on onend since Chrome stops after ~60 s of audio.
+
+  const startParallelWebSpeech = useCallback(() => {
+    if (usingWebSpeechRef.current) return; // already primary — handled by startWebSpeech
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) return; // not available in this browser
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (e) => {
+      if (usingWebSpeechRef.current) return; // Deepgram fell back — stop interfering
+      let interim = '';
+      for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
+        const result = e.results[i];
+        if (!result.isFinal) interim += result[0]?.transcript ?? '';
+        // Finals deliberately ignored — Deepgram handles those
+      }
+      if (interim.trim()) setPartial({ speaker: 'agent', text: interim.trim() });
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error !== 'aborted' && e.error !== 'no-speech') {
+        console.warn('[transcription] parallel WebSpeech error:', e.error);
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart so we never go dark between Chrome's 60-s windows
+      if (shouldReconnectRef.current && !usingWebSpeechRef.current) {
+        try { recognition.start(); } catch { /* already started or aborted */ }
+      }
+    };
+
+    parallelSpeechRef.current = recognition;
+    try {
+      recognition.start();
+      console.log('[transcription] parallel WebSpeech started — real-time partials active');
+    } catch (err) {
+      console.warn('[transcription] parallel WebSpeech failed to start:', err instanceof Error ? err.message : err);
+    }
+  }, []);
+
+  useEffect(() => { startParallelWebSpeechRef.current = startParallelWebSpeech; }, [startParallelWebSpeech]);
+
   // ── Send chunk to Deepgram via server ───────────────────────────────────────
 
   const sendChunk = useCallback(async (blob: Blob, seq: number, elapsedMs: number) => {
+    const t0 = performance.now();
     // Strip codec params: "audio/webm;codecs=opus" → "audio/webm"
     const contentType = (blob.type || 'audio/webm').split(';')[0].trim();
 
-    // Log first 32 bytes in hex so server logs show if the EBML header is present.
-    void blob.slice(0, 32).arrayBuffer().then((head) => {
-      const hex = Array.from(new Uint8Array(head)).map((x) => x.toString(16).padStart(2, '0')).join(' ');
-      const isWebM = hex.startsWith('1a 45 df a3');
-      const isOgg  = hex.startsWith('4f 67 67 53');
-      const valid  = isWebM || isOgg;
-      console.log(
-        `[transcription] chunk #${seq} header: ${hex.slice(0, 47)}…` +
-        ` | ${valid ? (isWebM ? 'valid WebM/EBML ✓' : 'valid Ogg ✓') : 'UNKNOWN FORMAT ✗ — Deepgram will reject this'}`
-      );
-      if (!valid) {
-        console.error(`[transcription] chunk #${seq} INVALID — raw bytes are not WebM or Ogg. ` +
-          `blob.type=${blob.type} blob.size=${blob.size} elapsedMs=${elapsedMs}`);
-      }
-    });
+    // Container validation — dev only (non-blocking, detached promise)
+    if (process.env.NODE_ENV !== 'production') {
+      void blob.slice(0, 32).arrayBuffer().then((head) => {
+        const hex = Array.from(new Uint8Array(head)).map((x) => x.toString(16).padStart(2, '0')).join(' ');
+        const isWebM = hex.startsWith('1a 45 df a3');
+        const isOgg  = hex.startsWith('4f 67 67 53');
+        const valid  = isWebM || isOgg;
+        console.log(
+          `[transcription] chunk #${seq} header: ${hex.slice(0, 47)}…` +
+          ` | ${valid ? (isWebM ? 'valid WebM/EBML ✓' : 'valid Ogg ✓') : 'UNKNOWN FORMAT ✗ — Deepgram will reject this'}`
+        );
+        if (!valid) {
+          console.error(`[transcription] chunk #${seq} INVALID — raw bytes are not WebM or Ogg. ` +
+            `blob.type=${blob.type} blob.size=${blob.size} elapsedMs=${elapsedMs}`);
+        }
+      });
+    }
 
     console.log(`[transcription] chunk #${seq} uploading — size=${blob.size} elapsedMs=${Math.round(elapsedMs)} contentType=${contentType} pipeline=${PIPELINE_VERSION}`);
 
@@ -269,8 +329,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       return;
     }
 
-    if (elapsedMs < 1000) {
-      console.warn(`[transcription] chunk #${seq} duration too short (${Math.round(elapsedMs)}ms < 1000ms) — skipping upload`);
+    if (elapsedMs < 400) {
+      console.warn(`[transcription] chunk #${seq} duration too short (${Math.round(elapsedMs)}ms < 400ms) — skipping upload`);
       return;
     }
 
@@ -285,11 +345,18 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         body: blob,
       });
 
-      console.log(`[transcription] chunk #${seq} response — HTTP ${res.status}`);
+      const t1 = performance.now();
+      console.log(`[transcription] chunk #${seq} response — HTTP ${res.status} | round-trip=${Math.round(t1 - t0)}ms`);
 
       if (res.status === 503) {
         console.warn('[transcription] Deepgram not configured (503) — falling back to Web Speech API');
         usingWebSpeechRef.current = true;
+        // Stop the partial-only parallel instance; the primary Web Speech will handle finals too
+        if (parallelSpeechRef.current) {
+          parallelSpeechRef.current.onend = null;
+          try { parallelSpeechRef.current.abort(); } catch { /* ignore */ }
+          parallelSpeechRef.current = null;
+        }
         startWebSpeechRef.current();
         return;
       }
@@ -557,7 +624,11 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     // Start the first chunk cycle. Subsequent cycles are self-scheduling
     // via onstop until shouldReconnectRef becomes false (End Call).
     startChunkCycleRef.current();
-  }, [startMonitoring]); // startChunkCycle accessed via ref — not a dep
+
+    // Launch parallel Web Speech for real-time interim partials.
+    // This gives <200 ms perceived latency while Deepgram handles final accuracy.
+    startParallelWebSpeechRef.current();
+  }, [startMonitoring]); // startChunkCycle and startParallelWebSpeech accessed via refs — not deps
 
   // ── Public: stopListening ───────────────────────────────────────────────────
   //
@@ -605,6 +676,12 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       speechRef.current.onend = null;
       try { speechRef.current.abort(); } catch { /* ignore */ }
       speechRef.current = null;
+    }
+
+    if (parallelSpeechRef.current) {
+      parallelSpeechRef.current.onend = null;
+      try { parallelSpeechRef.current.abort(); } catch { /* ignore */ }
+      parallelSpeechRef.current = null;
     }
 
     audioManagerRef.current.releaseAll(); // uses ref — no audioManager dep

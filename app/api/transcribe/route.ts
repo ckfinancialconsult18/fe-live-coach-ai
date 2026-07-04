@@ -8,8 +8,8 @@ interface DeepgramWord {
   confidence?: number;
 }
 
-// Models tried in order — nova-3 may not be on all plans.
-const DG_MODELS = ['nova-2', 'nova-2-general', 'nova', 'base'];
+// Models tried in order — nova-3 first (newest, fastest); fallback chain if not on plan.
+const DG_MODELS = ['nova-3', 'nova-2', 'nova-2-general', 'nova', 'base'];
 
 interface DgAttempt {
   model: string;
@@ -93,6 +93,7 @@ function extractDgMessage(body: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const routeStart = Date.now();
   // ── Step 0: auth ────────────────────────────────────────────────────────────
   const { user, response: authResponse } = await requireUser();
   if (!user) {
@@ -208,11 +209,11 @@ export async function POST(req: NextRequest) {
       '| words:', alternative.words?.length ?? 0,
       '| confidence:', alternative.confidence);
 
-    return NextResponse.json({
-      transcript: alternative.transcript ?? '',
-      words: alternative.words ?? [],
-      confidence: alternative.confidence ?? 0,
-    });
+    const durationMs = Date.now() - routeStart;
+    return NextResponse.json(
+      { transcript: alternative.transcript ?? '', words: alternative.words ?? [], confidence: alternative.confidence ?? 0 },
+      { headers: { 'X-Transcribe-Duration-Ms': String(durationMs) } }
+    );
   }
 
   // ── All models exhausted: return the ACTUAL Deepgram error, not a generic 502

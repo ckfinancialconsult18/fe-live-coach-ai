@@ -340,12 +340,12 @@ export function useAICoach(transcript: TranscriptLine[]) {
     }
   }, [applyInsight, applyMeta]);
 
-  // 200 ms debounce: coalesces rapid back-to-back Deepgram utterances before
+  // 100 ms debounce: coalesces rapid back-to-back Deepgram utterances before
   // hitting the coaching API. The abort in analyze() ensures any request still
   // running when the next one fires is cancelled immediately, not queued.
   const scheduleAnalysis = useCallback((lines: TranscriptLine[]) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => analyze(lines), 200);
+    debounceRef.current = setTimeout(() => analyze(lines), 100);
   }, [analyze]);
 
   return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState };
