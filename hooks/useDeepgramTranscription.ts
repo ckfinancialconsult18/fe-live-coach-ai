@@ -5,6 +5,7 @@ import type { TranscriptLine } from '@/lib/types';
 import type { UseMicrophoneReturn } from '@/hooks/useMicrophone';
 import { createLevelMeter, type LevelMeter } from '@/lib/audio/level-meter';
 import { useAudioInputManager } from '@/hooks/useAudioInputManager';
+import { emitPerf } from '@/lib/perf-bus';
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 export type TranscriptionMode = 'deepgram' | 'webspeech';
@@ -178,11 +179,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   const addLine = useCallback((text: string, speaker: 'agent' | 'prospect', confidence: number) => {
     if (!text.trim()) return;
+    const t0 = performance.now();
     setPartial(null);
     setTranscript((prev) => [
       ...prev,
       { id: nextId(), speaker, text: text.trim(), timestamp: new Date(), speakerConfidence: confidence },
     ]);
+    // Measure time from state update to next paint
+    requestAnimationFrame(() => emitPerf('transcript-render', Math.round(performance.now() - t0)));
   }, []);
 
   // ── Web Speech API fallback ─────────────────────────────────────────────────
@@ -334,6 +338,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       return;
     }
 
+    // Emit chunk size before upload so the panel shows even on failures
+    emitPerf('chunk-size', blob.size);
+
     try {
       const res = await fetch('/api/transcribe', {
         method: 'POST',
@@ -346,7 +353,12 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       });
 
       const t1 = performance.now();
-      console.log(`[transcription] chunk #${seq} response — HTTP ${res.status} | round-trip=${Math.round(t1 - t0)}ms`);
+      const roundTripMs = Math.round(t1 - t0);
+      console.log(`[transcription] chunk #${seq} response — HTTP ${res.status} | round-trip=${roundTripMs}ms`);
+      emitPerf('chunk-upload', roundTripMs);
+      // Parse server-reported Deepgram time (X-Transcribe-Duration-Ms header)
+      const dgMs = parseInt(res.headers.get('X-Transcribe-Duration-Ms') ?? '0', 10);
+      if (dgMs > 0) emitPerf('deepgram-latency', dgMs);
 
       if (res.status === 503) {
         console.warn('[transcription] Deepgram not configured (503) — falling back to Web Speech API');
@@ -529,7 +541,11 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       if (mctx.state === 'suspended') await mctx.resume().catch(() => {});
       monitorCtxRef.current = mctx;
       monitorMeterRef.current = createLevelMeter(target, mctx);
-      console.log('[transcription] level monitor attached — AudioContext state:', mctx.state);
+      // baseLatency is the hardware/driver buffer latency in seconds
+      const micLatencyMs = Math.round((mctx.baseLatency ?? 0) * 1000);
+      emitPerf('mic-latency', micLatencyMs);
+      console.log('[transcription] level monitor attached — AudioContext state:', mctx.state,
+        '| baseLatency:', micLatencyMs, 'ms');
     } catch (err) {
       console.warn('[transcription] level monitor unavailable:', err instanceof Error ? err.message : err);
     }

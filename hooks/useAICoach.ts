@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { emitPerf } from '@/lib/perf-bus';
 import type { TranscriptLine, CoachInsight, CallStage, UnderwritingProfile, EnhancedCarrierMatch, ChecklistItem, CallMemory, LiveSalesScores, DiscoveryItemState, MissedOpportunityState, EnhancedObjectionAnalysis, ObjectionHistoryEntry, ObjectionPriority, LiveObjectionState, ProbabilitySnapshot, LiveClosingState } from '@/lib/types';
 import { EMPTY_CALL_MEMORY } from '@/lib/types';
 import { matchCarriersEnhanced } from '@/lib/carrier-rules';
@@ -215,6 +216,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
     // Normalize defensively: the model may omit a field on a given turn
     // (e.g. no objection currently active) — fill gaps with neutral
     // defaults rather than letting downstream panels see `undefined`.
+    const renderT0 = performance.now();
     setInsight((prev) => ({
       ...DEFAULT_INSIGHT,
       ...rawInsight,
@@ -231,6 +233,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
       rapportBuilt: (rawInsight.rapportBuilt as boolean) ?? false,
       discoveryComplete: (rawInsight.discoveryComplete as boolean) ?? false,
     }));
+    requestAnimationFrame(() => emitPerf('coach-render', Math.round(performance.now() - renderT0)));
   }, []);
 
   const applyMeta = useCallback((meta: { stage?: CallStage; underwriting?: Record<string, unknown>; checklist?: Record<string, boolean> }) => {
@@ -283,6 +286,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
+    const coachT0 = performance.now();
     setIsAnalyzing(true);
     try {
       // Send only the 8 most-recent lines — enough context, minimal tokens.
@@ -332,6 +336,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
           } catch { /* ignore malformed frame */ }
         }
       }
+      emitPerf('ai-coaching', Math.round(performance.now() - coachT0));
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return; // expected — new request took over
       // other network errors — keep current insight panel state

@@ -16,6 +16,7 @@ import { LiveObjectionPanel } from '@/components/live-call/LiveObjectionPanel';
 import { LiveClosingPanel } from '@/components/live-call/LiveClosingPanel';
 import { CallTimeline } from '@/components/live-call/CallTimeline';
 import { RadarChart } from '@/components/live-call/RadarChart';
+import { PerformanceDebugPanel } from '@/components/debug/PerformanceDebugPanel';
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
@@ -76,6 +77,10 @@ export default function LiveCallPage() {
   const [preflight, setPreflight] = useState<PreflightResult>(null);
   const [showPreflight, setShowPreflight] = useState(true);
   const [callStartMs, setCallStartMs] = useState(0);
+  const [showPerfDebug, setShowPerfDebug] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('fe_perf_debug') === 'true';
+  });
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef = useRef<number>(0);
@@ -84,6 +89,22 @@ export default function LiveCallPage() {
   const seenStagesRef = useRef<Set<string>>(new Set());
   const readyForAppFiredRef = useRef(false);
   const closeOpportunityHistoryRef = useRef<{ value: number; atMs: number }[]>([]);
+
+  // Ctrl+Shift+D toggles the performance debug panel; persisted in localStorage
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setShowPerfDebug(prev => {
+          const next = !prev;
+          localStorage.setItem('fe_perf_debug', String(next));
+          return next;
+        });
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Pre-flight check: verify all requirements before the user clicks Start Call
   // so failures surface with exact, actionable messages rather than mid-call.
@@ -556,6 +577,18 @@ export default function LiveCallPage() {
         onStartCall={startCall}
         onEndCall={endCall}
       />
+
+      {/* Performance Debug Panel — Ctrl+Shift+D to toggle */}
+      {showPerfDebug && (
+        <PerformanceDebugPanel
+          connectionState={connectionState}
+          transcriptionMode={transcriptionMode}
+          onClose={() => {
+            setShowPerfDebug(false);
+            localStorage.setItem('fe_perf_debug', 'false');
+          }}
+        />
+      )}
     </div>
   );
 }
