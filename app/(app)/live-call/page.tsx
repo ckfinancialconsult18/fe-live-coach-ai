@@ -63,7 +63,7 @@ export default function LiveCallPage() {
     startListening, stopListening, clearTranscript, correctSpeaker,
     silenceWarning, audioWarning,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
   const [showPostCall, setShowPostCall] = useState(false);
@@ -154,6 +154,13 @@ export default function LiveCallPage() {
   useEffect(() => {
     if (transcript.length > 0) scheduleAnalysis(transcript);
   }, [transcript, scheduleAnalysis]);
+
+  // Interim coaching: feed Web Speech partials to the coaching engine as the agent speaks
+  useEffect(() => {
+    if (partial && transcript.length > 0 && partial.speaker === 'agent') {
+      scheduleInterimAnalysis(transcript, partial.text);
+    }
+  }, [partial, transcript, scheduleInterimAnalysis]);
 
   // Track distinct objections as they're actually detected (real count, not a timer increment).
   useEffect(() => {
@@ -486,7 +493,7 @@ export default function LiveCallPage() {
 
         {/* CENTER — AI Coach (32%) */}
         <div className="flex flex-col w-[32%] min-w-0 overflow-y-auto">
-          <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} />
+          <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} isInterimCoaching={isInterimCoaching} />
         </div>
 
         {/* RIGHT — Stage / Metrics / Underwriting / Memory (33%) */}

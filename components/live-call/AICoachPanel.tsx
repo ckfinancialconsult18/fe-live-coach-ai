@@ -9,11 +9,15 @@ import { NextBestActionPanel } from './NextBestActionPanel';
 interface Props {
   insight: CoachInsight;
   isAnalyzing: boolean;
+  /** True while coaching is based on a Web Speech interim (partial) transcript.
+   *  Content dims to gray and shows a "live" indicator; transitions to gold when
+   *  the confirmed Deepgram transcript lands and analysis completes. */
+  isInterimCoaching?: boolean;
 }
 
 const OBJECTION_CONFIDENCE_THRESHOLD = 55;
 
-export function AICoachPanel({ insight, isAnalyzing }: Props) {
+export function AICoachPanel({ insight, isAnalyzing, isInterimCoaching = false }: Props) {
   // Filter out low-confidence objections to avoid false positives
   const activeObjection = insight.objectionAnalysis && insight.objectionAnalysis.confidence >= OBJECTION_CONFIDENCE_THRESHOLD
     ? insight.objectionAnalysis
@@ -42,26 +46,61 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
       : null
     : null;
 
+  // Derive accent color: gray during interim, gold when confirmed
+  const accent = isInterimCoaching ? '#64748b' : '#D4AF37';
+  const accentBg = isInterimCoaching ? 'rgba(100,116,139,0.08)' : 'rgba(212,175,55,0.08)';
+  const accentBorder = isInterimCoaching ? 'rgba(100,116,139,0.2)' : 'rgba(212,175,55,0.2)';
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/6 shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded flex items-center justify-center text-xs"
-            style={{ background: 'rgba(212,175,55,0.15)' }}>
+          <div
+            className="w-5 h-5 rounded flex items-center justify-center text-xs transition-colors duration-500"
+            style={{ background: isInterimCoaching ? 'rgba(100,116,139,0.15)' : 'rgba(212,175,55,0.15)' }}
+          >
             🤖
           </div>
           <h2 className="text-sm font-semibold text-slate-200">AI Coach</h2>
         </div>
-        {isAnalyzing && (
-          <div className="flex items-center gap-1.5 text-[10px] text-[#D4AF37]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-live" />
-            Analyzing
-          </div>
-        )}
+
+        <div className="flex items-center gap-2">
+          {/* Interim badge — shown while predicting from partial transcript */}
+          {isInterimCoaching && !isAnalyzing && (
+            <div className="flex items-center gap-1 text-[10px] text-slate-500">
+              <span className="w-1 h-1 rounded-full bg-slate-500 animate-pulse" />
+              predicting
+            </div>
+          )}
+          {/* Analyzing badge — shown during confirmed analysis */}
+          {isAnalyzing && (
+            <div className="flex items-center gap-1.5 text-[10px] text-[#D4AF37]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-live" />
+              Analyzing
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      {/* Content — dims and desaturates during interim, transitions to gold when confirmed */}
+      <div
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-3"
+        style={{
+          opacity: isInterimCoaching ? 0.72 : 1,
+          filter: isInterimCoaching ? 'saturate(0.4)' : 'saturate(1)',
+          transition: 'opacity 0.45s ease, filter 0.45s ease',
+        }}
+      >
+        {/* Interim hint — visible only when coaching is based on partial text */}
+        {isInterimCoaching && (
+          <div className="flex items-center gap-1.5 -mt-0.5 mb-0.5 text-[9px] text-slate-600 border-b border-white/4 pb-2">
+            <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="6" cy="6" r="4.5" /><path d="M6 3.5v2.75l1.5 1" strokeLinecap="round" />
+            </svg>
+            Live — updating as you speak · will confirm when sentence ends
+          </div>
+        )}
         {/* Objection Engine — only shown when confidence >= threshold */}
         {activeObjection && (
           <ObjectionEnginePanel objection={activeObjection} isNew={objectionIsNew} />
@@ -114,9 +153,9 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
             discoveryComplete={insight.discoveryComplete}
           />
         ) : (
-          <div className="rounded-xl p-3 space-y-1.5 border"
-            style={{ background: 'rgba(212,175,55,0.05)', borderColor: 'rgba(212,175,55,0.2)' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Next Best Question</p>
+          <div className="rounded-xl p-3 space-y-1.5 border transition-colors duration-500"
+            style={{ background: accentBg, borderColor: accentBorder }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider transition-colors duration-500" style={{ color: accent }}>Next Best Question</p>
             <p className="text-sm text-slate-200">&quot;{insight.nextBestQuestion}&quot;</p>
           </div>
         )}
@@ -141,7 +180,7 @@ export function AICoachPanel({ insight, isAnalyzing }: Props) {
             <div className="space-y-2">
               {insight.alternativeResponses.map((r, i) => (
                 <div key={i} className="flex gap-2">
-                  <span className="text-[10px] font-bold text-[#D4AF37] mt-0.5 shrink-0">{i + 1}.</span>
+                  <span className="text-[10px] font-bold mt-0.5 shrink-0 transition-colors duration-500" style={{ color: accent }}>{i + 1}.</span>
                   <p className="text-xs text-slate-300 leading-relaxed">{r}</p>
                 </div>
               ))}

@@ -82,8 +82,13 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [objectionHistory, setObjectionHistory] = useState<ObjectionHistoryEntry[]>([]);
   const [probabilityHistory, setProbabilityHistory] = useState<ProbabilitySnapshot[]>([]);
 
+  const [isInterimCoaching, setIsInterimCoaching] = useState(false);
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const interimAbortRef = useRef<AbortController | null>(null);
+  const lastPartialRef = useRef<string>('');
   const memoryRef = useRef(memory);
   const lastNBARef = useRef<{ actionType: string; nextQuestion: string } | null>(null);
   useEffect(() => {
@@ -281,8 +286,11 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const analyze = useCallback(async (lines: TranscriptLine[]) => {
     if (lines.length === 0) return;
 
-    // Cancel any in-flight coaching request immediately — don't wait for it
+    // Cancel any in-flight requests — confirmed analysis takes priority over interim
     abortRef.current?.abort();
+    interimAbortRef.current?.abort();
+    interimAbortRef.current = null;
+    lastPartialRef.current = ''; // reset so next partial triggers fresh interim
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
@@ -328,9 +336,12 @@ export function useAICoach(transcript: TranscriptLine[]) {
               insightText += frame.d;
             } else if (frame.t === 'meta') {
               try { applyInsight(JSON.parse(insightText)); } catch { /* malformed — keep previous */ }
+              // Confirmed analysis landed — transition from gray (interim) to gold
+              setIsInterimCoaching(false);
               applyMeta(frame);
             } else if (frame.t === 'full') {
               applyInsight(frame.insight);
+              setIsInterimCoaching(false);
               applyMeta({ stage: frame.stage, underwriting: frame.underwriting, checklist: frame.checklist });
             }
           } catch { /* ignore malformed frame */ }
@@ -353,5 +364,91 @@ export function useAICoach(transcript: TranscriptLine[]) {
     debounceRef.current = setTimeout(() => analyze(lines), 100);
   }, [analyze]);
 
-  return { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, setStage, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState };
+  // ── Interim coaching — triggered by Web Speech API partials ────────────────
+  // Fires before Deepgram finalizes the transcript. Uses gpt-4o-mini with a
+  // lighter prompt so TTFB is ~200-300ms (vs ~600ms for the confirmed path).
+  // Displays in gray; transitions to gold when confirmed analysis completes.
+
+  const analyzeInterim = useCallback(async (lines: TranscriptLine[], partialText: string) => {
+    if (lines.length === 0) return;
+
+    interimAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    interimAbortRef.current = ctrl;
+
+    setIsInterimCoaching(true);
+
+    try {
+      const recentLines = lines.slice(-6);
+      // Append the in-progress utterance so the model sees what is being said
+      const transcriptText =
+        recentLines.map((l) => `${l.speaker === 'agent' ? 'AGENT' : 'PROSPECT'}: ${l.text}`).join('\n') +
+        `\nAGENT: [speaking] ${partialText}`;
+
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: transcriptText,
+          fullLength: lines.length,
+          memory: memoryRef.current,
+          lastNBA: lastNBARef.current,
+          isInterim: true,
+        }),
+        signal: ctrl.signal,
+      });
+
+      if (!res.ok || !res.body || ctrl.signal.aborted) return;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let insightText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || ctrl.signal.aborted) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line.trim()) continue;
+          try {
+            const frame = JSON.parse(line);
+            if (frame.t === 'delta') {
+              insightText += frame.d;
+            } else if (frame.t === 'meta') {
+              // Apply insight — isInterimCoaching stays true until confirmed analysis lands
+              try { applyInsight(JSON.parse(insightText)); } catch { /* malformed — keep previous */ }
+              // Skip applyMeta: interim never updates stage/underwriting/checklist
+            }
+          } catch { /* ignore malformed frame */ }
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return; // cancelled by new partial or confirmed analysis
+    }
+    // Intentionally do NOT setIsInterimCoaching(false) — only analyze() does that
+    // when confirmed data arrives. This keeps the gray state until gold is ready.
+  }, [applyInsight]);
+
+  // 100ms debounce — gives Web Speech time to settle before firing.
+  // De-duplicates: won't re-fire if the partial text is unchanged.
+  const scheduleInterimAnalysis = useCallback((lines: TranscriptLine[], partialText: string) => {
+    const text = partialText.trim();
+    // Require ≥4 words — fewer words give no useful coaching signal
+    if (!text || text === lastPartialRef.current) return;
+    if (text.split(/\s+/).filter(Boolean).length < 4) return;
+    lastPartialRef.current = text;
+    if (interimDebounceRef.current) clearTimeout(interimDebounceRef.current);
+    interimDebounceRef.current = setTimeout(() => analyzeInterim(lines, text), 100);
+  }, [analyzeInterim]);
+
+  return {
+    insight, stage, underwriting, carriers, checklist, isAnalyzing, isInterimCoaching,
+    scheduleAnalysis, scheduleInterimAnalysis, setStage, memory,
+    liveScores, missedOpportunities, liveObjectionState, liveClosingState,
+  };
 }

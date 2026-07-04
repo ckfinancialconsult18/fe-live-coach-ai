@@ -35,7 +35,13 @@ export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
-  const { transcript, fullLength, memory, lastNBA } = await req.json() as { transcript: string; fullLength: number; memory?: Record<string, unknown>; lastNBA?: { actionType: string; nextQuestion: string } | null };
+  const { transcript, fullLength: _fullLength, memory, lastNBA, isInterim } = await req.json() as {
+    transcript: string;
+    fullLength: number;
+    memory?: Record<string, unknown>;
+    lastNBA?: { actionType: string; nextQuestion: string } | null;
+    isInterim?: boolean;
+  };
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
   const encoder = new TextEncoder();
@@ -48,6 +54,54 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Interim mode: skip RAG + side calls, use gpt-4o-mini for <300ms TTFB ───
+  // Triggered when Web Speech API partials are available — before the full
+  // Deepgram transcript is finalized. Produces the same JSON structure as
+  // confirmed analysis so applyInsight() needs no branching.
+  if (isInterim) {
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (frame: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(JSON.stringify(frame) + '\n'));
+        try {
+          const interimStream = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: COACH_SYSTEM_PROMPT +
+                  '\n\nINTERIM MODE: The last line ends with "[speaking]" — the sentence is incomplete. ' +
+                  'Focus ONLY on: recommendedResponse, nextBestQuestion, nextBestAction, and detectedObjection (if clearly forming). ' +
+                  'Skip discovery/memory/family analysis. Keep your JSON concise.',
+              },
+              {
+                role: 'user',
+                content: `knownMemory: ${JSON.stringify(memory ?? {})}${lastNBA ? `\nlastNBA: ${JSON.stringify(lastNBA)}` : ''}\n\nConversation:\n\n${transcript}\n\nRespond in the exact JSON format specified.`,
+              },
+            ],
+            temperature: 0.2,
+            max_tokens: 500,
+            response_format: { type: 'json_object' },
+            stream: true,
+          });
+          for await (const chunk of interimStream) {
+            const delta = chunk.choices[0]?.delta?.content;
+            if (delta) send({ t: 'delta', d: delta });
+          }
+          // Emit a lightweight meta frame — no stage/underwriting changes mid-sentence
+          send({ t: 'meta', stage: null, underwriting: {}, checklist: {} });
+        } catch (err) {
+          console.error('Coach API interim error:', err);
+          send({ t: 'error', message: err instanceof Error ? err.message : 'Interim coaching failed' });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson' } });
+  }
+
+  // ── Confirmed mode: full analysis with RAG + side calls + gpt-4.1 ──────────
   const lastTurns = transcript.split('\n').slice(-6).join('\n');
   const retrievedChunks = await retrieveRelevantChunks(supabase, user.id, lastTurns, { matchCount: 4, minSimilarity: 0.45 }).catch(() => []);
   const ragContext = formatChunksForPrompt(retrievedChunks);
@@ -59,8 +113,6 @@ export async function POST(req: NextRequest) {
       try {
         // Underwriting + stage run concurrently with the streamed coach call —
         // by the time the coach stream finishes, these are almost always done.
-        // Underwriting + stage run concurrently with the main coach stream.
-        // gpt-4o-mini is fast enough for these structured extraction tasks.
         const sidePromise = Promise.all([
           openai.chat.completions.create({
             model: 'gpt-4o-mini',
@@ -82,9 +134,6 @@ export async function POST(req: NextRequest) {
           }),
         ]);
 
-        // GPT-4.1 for the main coaching response — faster and more accurate
-        // than gpt-4o for structured JSON reasoning. Falls back to gpt-4o if
-        // the env override points to a different model.
         const coachModel = process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1';
 
         const coachStream = await openai.chat.completions.create({
