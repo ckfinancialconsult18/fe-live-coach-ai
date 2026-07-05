@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "noEmit": false,
+    "outDir": ".next/server-build"
+  },
+  "include": [
+    "server.ts",
+    "lib/transcribe-ws-server.ts"
+  ]
+}
