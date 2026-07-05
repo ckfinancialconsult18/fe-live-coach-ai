@@ -15,8 +15,10 @@ export interface MetricSeries {
 
 export interface PerformanceSnapshot {
   micLatency: MetricSeries;
-  chunkUpload: MetricSeries;
-  deepgramLatency: MetricSeries;
+  chunkUpload: MetricSeries;      // legacy REST path
+  deepgramLatency: MetricSeries;  // server→browser network leg (ms)
+  wsRtt: MetricSeries;            // last chunk sent → first result (ms)
+  recorderInterval: MetricSeries; // actual ondataavailable gap (ms)
   aiCoaching: MetricSeries;
   transcriptRender: MetricSeries;
   coachRender: MetricSeries;
@@ -35,6 +37,8 @@ function DEFAULT(): PerformanceSnapshot {
     micLatency: emptySeries(),
     chunkUpload: emptySeries(),
     deepgramLatency: emptySeries(),
+    wsRtt: emptySeries(),
+    recorderInterval: emptySeries(),
     aiCoaching: emptySeries(),
     transcriptRender: emptySeries(),
     coachRender: emptySeries(),
@@ -54,19 +58,23 @@ function pushValue(series: MetricSeries, value: number): MetricSeries {
 
 function seriesKey(type: PerfEventType): keyof PerformanceSnapshot | null {
   switch (type) {
-    case 'mic-latency':       return 'micLatency';
-    case 'chunk-upload':      return 'chunkUpload';
-    case 'deepgram-latency':  return 'deepgramLatency';
-    case 'ai-coaching':       return 'aiCoaching';
-    case 'transcript-render': return 'transcriptRender';
-    case 'coach-render':      return 'coachRender';
-    case 'chunk-size':        return 'chunkSizeKb'; // converted to KB on push
-    default:                  return null;
+    case 'mic-latency':        return 'micLatency';
+    case 'chunk-upload':       return 'chunkUpload';
+    case 'deepgram-latency':   return 'deepgramLatency';
+    case 'ws-rtt':             return 'wsRtt';
+    case 'recorder-interval':  return 'recorderInterval';
+    case 'ai-coaching':        return 'aiCoaching';
+    case 'transcript-render':  return 'transcriptRender';
+    case 'coach-render':       return 'coachRender';
+    case 'chunk-size':         return 'chunkSizeKb'; // converted to KB on push
+    default:                   return null;
   }
 }
 
 function computeOverall(snap: PerformanceSnapshot): Pick<PerformanceSnapshot, 'avgOverallMs' | 'maxOverallMs'> {
-  const latencies = [snap.chunkUpload, snap.deepgramLatency, snap.aiCoaching].filter(s => s.current > 0);
+  // Prefer wsRtt (streaming pipeline) over chunkUpload (legacy REST).
+  const pipelineLatency = snap.wsRtt.current > 0 ? snap.wsRtt : snap.chunkUpload;
+  const latencies = [pipelineLatency, snap.deepgramLatency, snap.aiCoaching].filter(s => s.current > 0);
   if (!latencies.length) return { avgOverallMs: 0, maxOverallMs: 0 };
   const avgOverallMs = Math.round(latencies.reduce((s, l) => s + l.avg, 0) / latencies.length);
   const maxOverallMs = Math.max(...latencies.map(l => l.max));

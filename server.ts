@@ -70,9 +70,10 @@ app.prepare().then(() => {
       wss.handleUpgrade(req, socket as never, head, (ws) => {
         void handleTranscribeWs(ws, req);
       });
-    } else {
-      socket.destroy();
     }
+    // All other WebSocket paths (e.g. /_next/webpack-hmr for HMR) are left
+    // unhandled here — Next.js attaches its own upgrade listener that picks
+    // them up. Destroying them would break hot reload in development.
   });
 
   httpServer.listen(port, () => {

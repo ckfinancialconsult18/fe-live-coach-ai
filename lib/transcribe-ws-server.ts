@@ -28,11 +28,12 @@ interface DgWord {
   confidence?: number;
 }
 
-interface DgResultsEvent {
+interface DgEvent {
   type: string;
-  is_final: boolean;
-  speech_final: boolean;
-  channel: {
+  // Results event fields
+  is_final?: boolean;
+  speech_final?: boolean;
+  channel?: {
     alternatives: Array<{
       transcript: string;
       confidence: number;
@@ -43,8 +44,9 @@ interface DgResultsEvent {
 
 type ClientMsg =
   | { type: 'connected' }
-  | { type: 'interim'; transcript: string; words: DgWord[]; confidence: number }
-  | { type: 'final';   transcript: string; words: DgWord[]; confidence: number }
+  | { type: 'interim'; transcript: string; words: DgWord[]; confidence: number; serverTs: number }
+  | { type: 'final';   transcript: string; words: DgWord[]; confidence: number; serverTs: number }
+  | { type: 'speech-started'; serverTs: number }
   | { type: 'error';   message: string };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -170,11 +172,18 @@ export async function handleTranscribeWs(
     });
 
     dg.on('message', (raw) => {
-      let event: DgResultsEvent;
+      let event: DgEvent;
       try {
-        event = JSON.parse(raw.toString()) as DgResultsEvent;
+        event = JSON.parse(raw.toString()) as DgEvent;
       } catch {
         return; // non-JSON keepalive or status frame
+      }
+
+      // SpeechStarted: Deepgram VAD detected voice — forward so client can
+      // measure time-from-first-audio-to-speech-detected.
+      if (event.type === 'SpeechStarted') {
+        sendToClient(clientWs, { type: 'speech-started', serverTs: Date.now() });
+        return;
       }
 
       if (event.type !== 'Results') return;
@@ -183,10 +192,13 @@ export async function handleTranscribeWs(
       if (!alt?.transcript?.trim()) return;
 
       sendToClient(clientWs, {
-        type: event.is_final ? 'final' : 'interim',
+        type: event.is_final === true ? 'final' : 'interim',
         transcript: alt.transcript,
         words: alt.words ?? [],
         confidence: alt.confidence ?? 0,
+        // Server timestamp lets the client compute network+Deepgram latency
+        // independently of the browser→server leg.
+        serverTs: Date.now(),
       });
     });
 

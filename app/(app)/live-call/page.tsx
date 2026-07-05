@@ -61,7 +61,7 @@ export default function LiveCallPage() {
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
     startListening, stopListening, clearTranscript, correctSpeaker,
-    silenceWarning, audioWarning,
+    silenceWarning, audioWarning, recorderIntervalMs,
   } = useDeepgramTranscription(mic);
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis } = useAICoach(transcript);
 
@@ -590,6 +590,7 @@ export default function LiveCallPage() {
         <PerformanceDebugPanel
           connectionState={connectionState}
           transcriptionMode={transcriptionMode}
+          recorderIntervalMs={recorderIntervalMs}
           onClose={() => {
             setShowPerfDebug(false);
             localStorage.setItem('fe_perf_debug', 'false');

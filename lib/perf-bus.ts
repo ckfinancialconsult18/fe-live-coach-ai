@@ -5,13 +5,15 @@
  */
 
 export type PerfEventType =
-  | 'mic-latency'       // AudioContext.baseLatency * 1000 (ms)
-  | 'chunk-upload'      // full round-trip to /api/transcribe (ms)
-  | 'deepgram-latency'  // server-reported Deepgram processing (ms) via X-Transcribe-Duration-Ms
-  | 'ai-coaching'       // full round-trip to /api/coach (ms)
-  | 'transcript-render' // setTranscript() → next animation frame (ms)
-  | 'coach-render'      // setInsight() → next animation frame (ms)
-  | 'chunk-size';       // blob.size in bytes
+  | 'mic-latency'        // AudioContext.baseLatency × 1000 (ms) — hardware buffer
+  | 'chunk-upload'       // [legacy REST] full round-trip to /api/transcribe (ms)
+  | 'deepgram-latency'   // server→browser leg: server timestamp when DG result arrived → browser receive (ms)
+  | 'ws-rtt'             // [streaming WS] last chunk sent → first result received (ms)
+  | 'recorder-interval'  // actual measured interval between consecutive ondataavailable events (ms)
+  | 'ai-coaching'        // full round-trip to /api/coach including streaming time (ms)
+  | 'transcript-render'  // setTranscript() → next animation frame (ms)
+  | 'coach-render'       // setInsight() → next animation frame (ms)
+  | 'chunk-size';        // blob.size in bytes
 
 export interface PerfEvent {
   type: PerfEventType;

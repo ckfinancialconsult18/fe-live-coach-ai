@@ -60,13 +60,29 @@ export interface UseDeepgramTranscriptionReturn {
   disableSpeakerMode: () => void;
   audioWarning: string | null;
   silenceWarning: string | null;
+  /** Active MediaRecorder timeslice interval in ms (100/150/200/250/300). */
+  recorderIntervalMs: number;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PIPELINE_VERSION = 'deepgram-streaming-v1';
-// 250 ms gives Deepgram enough data per chunk while keeping latency low.
-const TIMESLICE_MS = 250;
+
+// MediaRecorder timeslice — configurable for benchmarking.
+// Valid values: 100 | 150 | 200 | 250 | 300 ms.
+// Change via localStorage key 'fe_recorder_interval_ms', then restart the call.
+// Default 250 ms gives Deepgram enough data per chunk while keeping perceived
+// latency low. See the Performance Debug Panel (Ctrl+Shift+D) for live metrics.
+const VALID_INTERVALS = [100, 150, 200, 250, 300] as const;
+const DEFAULT_TIMESLICE_MS = 250;
+const LS_INTERVAL_KEY = 'fe_recorder_interval_ms';
+
+function readStoredInterval(): number {
+  if (typeof window === 'undefined') return DEFAULT_TIMESLICE_MS;
+  const v = parseInt(localStorage.getItem(LS_INTERVAL_KEY) ?? '', 10);
+  return (VALID_INTERVALS as readonly number[]).includes(v) ? v : DEFAULT_TIMESLICE_MS;
+}
+
 // Peak RMS below this = silent chunk
 const SILENCE_PEAK_THRESHOLD = 0.01;
 // Warn after this many consecutive silent heartbeat ticks (1 tick = 1 s)
@@ -86,11 +102,14 @@ interface DgWord {
 }
 
 interface WsServerMessage {
-  type: 'connected' | 'interim' | 'final' | 'error';
+  type: 'connected' | 'interim' | 'final' | 'error' | 'speech-started';
   transcript?: string;
   words?: DgWord[];
   confidence?: number;
   message?: string;
+  /** Server-side Date.now() when Deepgram result arrived. Used to measure
+   *  the server→browser network leg independently of processing time. */
+  serverTs?: number;
 }
 
 function dominantSpeaker(words: DgWord[]): 'agent' | 'prospect' {
@@ -181,6 +200,17 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const monitorMeterRef = useRef<LevelMeter | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const silentTicksRef = useRef(0); // consecutive silent heartbeat ticks
+
+  // ── Latency tracking refs ─────────────────────────────────────────────────
+  // lastSentAtRef: Date.now() when the most recent audio blob was ws.send()ed.
+  // ws-rtt is measured as (result received) − lastSentAtRef.
+  const lastSentAtRef = useRef<number>(0);
+  // lastChunkPerfRef: performance.now() of the previous ondataavailable event.
+  // recorder-interval is the gap between consecutive ondataavailable calls.
+  const lastChunkPerfRef = useRef<number>(0);
+  // Active interval — read once at startListening so a mid-call localStorage
+  // change doesn't silently take effect partway through a recording.
+  const activeIntervalMsRef = useRef<number>(DEFAULT_TIMESLICE_MS);
 
   // Stable function refs
   const startRecorderRef = useRef<() => void>(() => {});
@@ -402,15 +432,26 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     }
 
     recorderRef.current = recorder;
-    console.log(`[transcription] MediaRecorder starting — timeslice=${TIMESLICE_MS}ms mimeType=${recorder.mimeType} pipeline=${PIPELINE_VERSION}`);
+    const timeslice = activeIntervalMsRef.current;
+    lastChunkPerfRef.current = 0; // reset interval baseline for new recorder
+    console.log(`[transcription] MediaRecorder.start(${timeslice}) — mimeType=${recorder.mimeType} pipeline=${PIPELINE_VERSION}`);
 
     recorder.ondataavailable = (e) => {
       if (e.data.size < 10) return; // skip empty/header-only fragments
+
+      // ── Measure actual interval between chunks ──────────────────────────────
+      const nowPerf = performance.now();
+      if (lastChunkPerfRef.current > 0) {
+        emitPerf('recorder-interval', Math.round(nowPerf - lastChunkPerfRef.current));
+      }
+      lastChunkPerfRef.current = nowPerf;
 
       emitPerf('chunk-size', e.data.size);
 
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
+        // Record send timestamp for ws-rtt measurement
+        lastSentAtRef.current = Date.now();
         ws.send(e.data);
       }
       // If WS is not yet open, the server buffers audio in audioQueue
@@ -420,7 +461,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       console.error('[transcription] MediaRecorder error:', e);
     };
 
-    recorder.start(TIMESLICE_MS);
+    recorder.start(timeslice);
   }, []);
 
   useEffect(() => { startRecorderRef.current = startRecorder; }, [startRecorder]);
@@ -479,7 +520,15 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       if (msg.type === 'connected') {
         console.log('[transcription] Deepgram streaming session connected');
 
+      } else if (msg.type === 'speech-started') {
+        // Deepgram VAD detected voice onset — log for debugging.
+        console.log(`[transcription] DG SpeechStarted serverTs=${msg.serverTs}`);
+
       } else if (msg.type === 'interim') {
+        // ws-rtt: time from last audio chunk sent to this result arriving.
+        if (lastSentAtRef.current > 0) emitPerf('ws-rtt', Date.now() - lastSentAtRef.current);
+        // deepgram-latency: server timestamp → browser receive (server→browser network only).
+        if (msg.serverTs) emitPerf('deepgram-latency', Date.now() - msg.serverTs);
         // Deepgram interim overrides the parallel Web Speech partial with higher
         // accuracy text. Both sources set setPartial() — most recent wins.
         if (msg.transcript?.trim()) {
@@ -487,14 +536,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         }
 
       } else if (msg.type === 'final') {
+        if (lastSentAtRef.current > 0) emitPerf('ws-rtt', Date.now() - lastSentAtRef.current);
+        if (msg.serverTs) emitPerf('deepgram-latency', Date.now() - msg.serverTs);
         if (msg.transcript?.trim()) {
-          const t0 = performance.now();
           addLine(
             msg.transcript,
             dominantSpeaker(msg.words ?? []),
             Math.round((msg.confidence ?? 0.8) * 100),
           );
-          requestAnimationFrame(() => emitPerf('deepgram-latency', Math.round(performance.now() - t0)));
         }
 
       } else if (msg.type === 'error') {
@@ -569,6 +618,11 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     reconnectAttemptRef.current = 0;
     usingWebSpeechRef.current = false;
     silentTicksRef.current = 0;
+    lastSentAtRef.current = 0;
+    lastChunkPerfRef.current = 0;
+    // Snapshot interval once per call so mid-call localStorage changes don't
+    // take effect until the next call.
+    activeIntervalMsRef.current = readStoredInterval();
 
     // MediaRecorder unavailable → fall back to Web Speech only
     if (typeof window === 'undefined' || !window.MediaRecorder) {
@@ -732,5 +786,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     disableSpeakerMode: audioManager.releaseSpeakerMode,
     audioWarning: audioManager.warning,
     silenceWarning,
+    recorderIntervalMs: activeIntervalMsRef.current,
   };
 }

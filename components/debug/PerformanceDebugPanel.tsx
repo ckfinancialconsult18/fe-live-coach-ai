@@ -8,6 +8,7 @@ import type { ConnectionState, TranscriptionMode } from '@/hooks/useDeepgramTran
 interface Props {
   connectionState: ConnectionState;
   transcriptionMode: TranscriptionMode | null;
+  recorderIntervalMs?: number;
   onClose: () => void;
 }
 
@@ -104,9 +105,19 @@ function ConnectionBadge({ state, mode }: { state: ConnectionState; mode: Transc
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
-export function PerformanceDebugPanel({ connectionState, transcriptionMode, onClose }: Props) {
+const VALID_INTERVALS = [100, 150, 200, 250, 300] as const;
+const LS_INTERVAL_KEY = 'fe_recorder_interval_ms';
+
+function readStoredInterval(): number {
+  if (typeof window === 'undefined') return 250;
+  const v = parseInt(localStorage.getItem(LS_INTERVAL_KEY) ?? '', 10);
+  return (VALID_INTERVALS as readonly number[]).includes(v) ? v : 250;
+}
+
+export function PerformanceDebugPanel({ connectionState, transcriptionMode, recorderIntervalMs, onClose }: Props) {
   const metrics = usePerformanceMetrics();
   const [expanded, setExpanded] = useState(true);
+  const [storedInterval, setStoredInterval] = useState(readStoredInterval);
 
   const handleExport = useCallback(() => {
     const json = exportPerfLogs();
@@ -178,69 +189,108 @@ export function PerformanceDebugPanel({ connectionState, transcriptionMode, onCl
 
       {expanded && (
         <div className="p-2.5 space-y-2">
-          {/* Grid: 3 columns */}
+          {/* Row 1: pipeline latency metrics */}
+          <div className="grid grid-cols-3 gap-2">
+            <MetricCard
+              label="WS RTT"
+              series={metrics.wsRtt}
+              description="Last audio chunk sent → first Deepgram result received (full round-trip, streaming pipeline)"
+            />
+            <MetricCard
+              label="DG Server→Browser"
+              series={metrics.deepgramLatency}
+              description="Server timestamp when DG result arrived → browser receive (measures server→browser network only)"
+            />
+            <MetricCard
+              label="Recorder Interval"
+              series={metrics.recorderInterval}
+              description="Actual gap between consecutive MediaRecorder ondataavailable events — should ≈ configured interval"
+            />
+          </div>
+
+          {/* Row 2: render + AI */}
           <div className="grid grid-cols-3 gap-2">
             <MetricCard
               label="Mic Latency"
               series={metrics.micLatency}
-              description="AudioContext.baseLatency — hardware/driver buffering delay before audio reaches the browser"
-            />
-            <MetricCard
-              label="Chunk Upload"
-              series={metrics.chunkUpload}
-              description="Full round-trip time: client fetch → /api/transcribe → Deepgram → response back to client"
-            />
-            <MetricCard
-              label="Deepgram"
-              series={metrics.deepgramLatency}
-              description="Server-reported Deepgram processing time only (X-Transcribe-Duration-Ms header)"
+              description="AudioContext.baseLatency — hardware/driver buffer before audio reaches the browser"
             />
             <MetricCard
               label="AI Coaching"
               series={metrics.aiCoaching}
-              description="Full round-trip to /api/coach including streaming response time to first frame"
+              description="Full round-trip to /api/coach including streaming time"
             />
             <MetricCard
               label="Transcript Render"
               series={metrics.transcriptRender}
-              description="Time from setTranscript() call to next animation frame (React rendering cost)"
-            />
-            <MetricCard
-              label="Coach Render"
-              series={metrics.coachRender}
-              description="Time from setInsight() to next animation frame (React rendering cost)"
+              description="setTranscript() → next animation frame (React cost)"
             />
           </div>
 
-          {/* Row: chunk size + overall stats */}
+          {/* Row 3: chunk size + summary stats + interval selector */}
           <div className="grid grid-cols-3 gap-2">
             <MetricCard
               label="Chunk Size"
               series={metrics.chunkSizeKb}
               unit="KB"
               colorFn={kbColor}
-              description="Size of each audio blob sent to Deepgram — larger chunks take longer to upload"
+              description="Size of each audio blob sent via WebSocket"
             />
 
-            {/* Packets/sec + overall worst */}
-            <div className="col-span-2 bg-white/4 border border-white/8 rounded-lg p-2 grid grid-cols-2 gap-x-4 gap-y-1.5 content-center">
-              <Stat label="Packets / sec" value={`${metrics.packetsPerSec}`} color="#94a3b8" />
-              <Stat label="Avg Overall" value={metrics.avgOverallMs > 0 ? `${metrics.avgOverallMs}ms` : '—'} color={msColor(metrics.avgOverallMs)} />
-              <Stat label="Longest Seen" value={metrics.maxOverallMs > 0 ? `${metrics.maxOverallMs}ms` : '—'} color={msColor(metrics.maxOverallMs)} />
-              <Stat label="Connection" value={connectionState} color={connectionState === 'connected' ? '#22c55e' : '#eab308'} />
+            <div className="bg-white/4 border border-white/8 rounded-lg p-2 grid grid-cols-2 gap-x-4 gap-y-1.5 content-center">
+              <Stat label="Packets/sec" value={`${metrics.packetsPerSec}`} color="#94a3b8" />
+              <Stat label="Avg RTT" value={metrics.avgOverallMs > 0 ? `${metrics.avgOverallMs}ms` : '—'} color={msColor(metrics.avgOverallMs)} />
+              <Stat label="Worst RTT" value={metrics.maxOverallMs > 0 ? `${metrics.maxOverallMs}ms` : '—'} color={msColor(metrics.maxOverallMs)} />
+              <Stat label="Active" value={recorderIntervalMs != null ? `${recorderIntervalMs}ms` : `${storedInterval}ms`} color="#D4AF37" />
+            </div>
+
+            {/* Interval selector for benchmarking */}
+            <div className="bg-white/4 border border-white/8 rounded-lg p-2 flex flex-col gap-1.5">
+              <span className="text-[8.5px] text-slate-500 uppercase tracking-wider">Recorder Interval</span>
+              <div className="grid grid-cols-5 gap-0.5">
+                {VALID_INTERVALS.map((ms) => {
+                  const isActive = (recorderIntervalMs ?? storedInterval) === ms;
+                  const isStored = storedInterval === ms;
+                  return (
+                    <button
+                      key={ms}
+                      onClick={() => {
+                        localStorage.setItem(LS_INTERVAL_KEY, String(ms));
+                        setStoredInterval(ms);
+                      }}
+                      className="py-0.5 rounded text-[8.5px] font-mono transition-colors"
+                      style={{
+                        background: isActive ? 'rgba(212,175,55,0.2)' : isStored ? 'rgba(212,175,55,0.08)' : 'rgba(255,255,255,0.04)',
+                        color: isActive ? '#D4AF37' : isStored ? '#a88c2a' : '#64748b',
+                        border: `1px solid ${isActive ? 'rgba(212,175,55,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                      }}
+                      title={`Set recorder interval to ${ms}ms (takes effect on next call start)`}
+                    >
+                      {ms}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-[7.5px] text-slate-700 leading-tight">
+                {(recorderIntervalMs ?? storedInterval) !== storedInterval
+                  ? `Next call: ${storedInterval}ms`
+                  : 'Restart call to apply'}
+              </span>
             </div>
           </div>
 
           {/* Legend */}
           <div className="flex items-center gap-3 pt-0.5 border-t border-white/6">
-            <span className="text-[8.5px] text-slate-600 uppercase tracking-wider">Threshold</span>
+            <span className="text-[8.5px] text-slate-600 uppercase tracking-wider font-semibold">Pipeline</span>
+            <span className="text-[8.5px] font-mono text-slate-500">continuous-ws</span>
+            <span className="text-[8.5px] text-slate-700 mx-1">·</span>
             {[['<300ms', '#22c55e'], ['300–800ms', '#eab308'], ['>800ms', '#ef4444']].map(([label, color]) => (
               <span key={label} className="flex items-center gap-1 text-[8.5px] text-slate-500">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
                 {label}
               </span>
             ))}
-            <span className="text-[8.5px] text-slate-700 ml-auto">Ctrl+Shift+D to toggle</span>
+            <span className="text-[8.5px] text-slate-700 ml-auto">Ctrl+Shift+D</span>
           </div>
         </div>
       )}
