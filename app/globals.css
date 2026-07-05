@@ -142,6 +142,12 @@ body {
   animation: live-pulse 1.4s ease-in-out infinite;
 }
 
+/* Transcript streaming cursor */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 /* Coaching panel alert */
 @keyframes alert-slide {
   from { opacity: 0; transform: translateY(-8px); }

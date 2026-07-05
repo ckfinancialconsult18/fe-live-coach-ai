@@ -16,6 +16,24 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
 
+  // Track when a partial finalizes so the new final line can skip its fade-in
+  // animation — otherwise there's a visible flash as partial disappears and
+  // the final row fades in from opacity-0.
+  const prevPartialRef = useRef<PartialTranscript | null>(null);
+  const [skipFadeForId, setSkipFadeForId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const wasPartial = prevPartialRef.current;
+    prevPartialRef.current = partial ?? null;
+    if (wasPartial && !partial && lines.length > 0) {
+      const lastId = lines[lines.length - 1].id;
+      setSkipFadeForId(lastId);
+      // Clear after any CSS animation would complete
+      const t = setTimeout(() => setSkipFadeForId(null), 300);
+      return () => clearTimeout(t);
+    }
+  }, [partial, lines]);
+
   useEffect(() => {
     if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [lines, partial, autoScroll]);
@@ -37,7 +55,6 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
           <span className="text-xs text-slate-500">{lines.length} lines</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Search */}
           <div className="relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
@@ -50,7 +67,6 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
               className="w-44 h-7 pl-8 pr-3 rounded-lg bg-white/5 border border-white/8 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-[rgba(212,175,55,0.4)]"
             />
           </div>
-          {/* Auto-scroll toggle */}
           <button
             onClick={() => setAutoScroll((a) => !a)}
             className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
@@ -95,7 +111,13 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
         )}
 
         {filtered.map((line) => (
-          <TranscriptRow key={line.id} line={line} fmt={fmt} onCorrectSpeaker={onCorrectSpeaker} />
+          <TranscriptRow
+            key={line.id}
+            line={line}
+            fmt={fmt}
+            noAnimation={line.id === skipFadeForId}
+            onCorrectSpeaker={onCorrectSpeaker}
+          />
         ))}
         {partial && partial.text && <PartialRow partial={partial} />}
         <div ref={bottomRef} />
@@ -122,21 +144,91 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
   );
 }
 
+// ── Streaming partial row ──────────────────────────────────────────────────────
+// Animates new characters in at ~180 chars/sec (3 chars/frame @ 60fps), which
+// matches the feel of ChatGPT streaming. Only the delta from the last displayed
+// text is animated; corrections (shorter text) snap immediately.
+
 function PartialRow({ partial }: { partial: PartialTranscript }) {
   const isAgent = partial.speaker === 'agent';
+
+  // `displayed` is what's currently rendered — it lags `partial.text` while
+  // the animation is in flight.
+  const [displayed, setDisplayed] = useState(partial.text);
+  const displayedRef = useRef(partial.text);
+  const targetRef = useRef(partial.text);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const next = partial.text;
+    targetRef.current = next;
+
+    // Cancel in-flight animation from previous target
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+
+    const prev = displayedRef.current;
+
+    // Find the longest common prefix so we only animate what changed
+    let commonLen = 0;
+    const minLen = Math.min(prev.length, next.length);
+    while (commonLen < minLen && prev[commonLen] === next[commonLen]) commonLen++;
+
+    if (next.length <= commonLen) {
+      // Deepgram corrected to something shorter — snap, no animation
+      displayedRef.current = next;
+      setDisplayed(next);
+      return;
+    }
+
+    const base = next.slice(0, commonLen);
+    const suffix = next.slice(commonLen);
+    let charIdx = 0;
+    // 3 chars per frame ≈ 180 chars/sec at 60 fps — fast enough to feel real-time,
+    // slow enough that individual word arrivals are visible
+    const CHARS_PER_FRAME = 3;
+
+    function tick() {
+      if (targetRef.current !== next) return; // a newer target arrived, abort
+      charIdx = Math.min(charIdx + CHARS_PER_FRAME, suffix.length);
+      const text = base + suffix.slice(0, charIdx);
+      displayedRef.current = text;
+      setDisplayed(text);
+      if (charIdx < suffix.length) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        rafRef.current = null;
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [partial.text]);
+
   return (
     <div className={`flex gap-3 ${isAgent ? '' : 'flex-row-reverse'}`}>
-      <div className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold opacity-50 ${
-        isAgent ? 'text-[#090d18]' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
-      }`} style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}>
+      <div
+        className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold opacity-50 ${
+          isAgent ? 'text-[#090d18]' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
+        }`}
+        style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}
+      >
         {isAgent ? 'A' : 'P'}
       </div>
       <div className={`flex flex-col max-w-[85%] ${isAgent ? 'items-start' : 'items-end'}`}>
-        <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed italic text-slate-400 border border-dashed ${
-          isAgent ? 'border-[rgba(212,175,55,0.2)] rounded-tl-sm' : 'border-blue-500/15 rounded-tr-sm'
-        }`}>
-          {partial.text}
-          <span className="inline-block w-1 h-3 ml-0.5 bg-slate-500 animate-pulse align-middle" />
+        <div
+          className={`px-3 py-2 rounded-2xl text-sm leading-relaxed italic text-slate-400 border border-dashed ${
+            isAgent ? 'border-[rgba(212,175,55,0.2)] rounded-tl-sm' : 'border-blue-500/15 rounded-tr-sm'
+          }`}
+        >
+          {displayed}
+          {/* Blinking cursor — sits at the end of displayed text as it animates */}
+          <span className="inline-block w-[2px] h-[0.9em] ml-[2px] bg-slate-400 align-middle"
+            style={{ animation: 'blink-cursor 1s step-end infinite' }} />
         </div>
         <span className="text-[10px] text-slate-700 mt-1 px-1">transcribing…</span>
       </div>
@@ -144,30 +236,29 @@ function PartialRow({ partial }: { partial: PartialTranscript }) {
   );
 }
 
-function TranscriptRow({ line, fmt, onCorrectSpeaker }: {
+// ── Finalized transcript row ───────────────────────────────────────────────────
+
+function TranscriptRow({ line, fmt, noAnimation, onCorrectSpeaker }: {
   line: TranscriptLine;
   fmt: (d: Date) => string;
+  noAnimation?: boolean;
   onCorrectSpeaker?: (lineId: string) => void;
 }) {
   const isAgent = line.speaker === 'agent';
   const lowConfidence = line.speakerConfidence != null && line.speakerConfidence < 50;
   return (
-    <div className={`flex gap-3 animate-fade-in ${isAgent ? '' : 'flex-row-reverse'}`}>
-      {/* Avatar */}
+    <div className={`flex gap-3 ${isAgent ? '' : 'flex-row-reverse'} ${noAnimation ? '' : 'animate-fade-in'}`}>
       <button
         onClick={() => onCorrectSpeaker?.(line.id)}
         title="Click to correct speaker"
         className={`w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-transform hover:scale-110 ${
-          isAgent
-            ? 'text-[#090d18]'
-            : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
+          isAgent ? 'text-[#090d18]' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
         }`}
         style={isAgent ? { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' } : {}}
       >
         {isAgent ? 'A' : 'P'}
       </button>
 
-      {/* Bubble */}
       <div className={`flex flex-col max-w-[85%] ${isAgent ? 'items-start' : 'items-end'}`}>
         <div className={`
           px-3 py-2 rounded-2xl text-sm leading-relaxed
