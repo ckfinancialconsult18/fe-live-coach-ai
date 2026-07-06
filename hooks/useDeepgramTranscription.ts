@@ -200,6 +200,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const monitorCtxRef = useRef<AudioContext | null>(null);
   const monitorMeterRef = useRef<LevelMeter | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tokenRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const silentTicksRef = useRef(0); // consecutive silent heartbeat ticks
 
   // ── Latency tracking refs ─────────────────────────────────────────────────
@@ -682,6 +683,27 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     // before the WS connection is ready.
     await openTranscribeWsRef.current();
 
+    // Refresh the Supabase token every 45 min so calls longer than 1 hour keep
+    // a valid session. Supabase tokens expire at 60 min by default; refreshing
+    // at 45 min gives a 15 min buffer. The new token is sent to the server via
+    // a { type: 'reauth' } message so the connection stays authorised without
+    // tearing down the Deepgram stream.
+    const TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
+    tokenRefreshTimerRef.current = setInterval(async () => {
+      if (!shouldReconnectRef.current) return;
+      const supabase = createSupabaseClient();
+      const { data, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError || !data.session) {
+        console.warn('[transcription] token refresh failed — session may have expired:', refreshError?.message);
+        return;
+      }
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'reauth', token: data.session.access_token }));
+        console.log('[transcription] token refreshed and sent to server');
+      }
+    }, TOKEN_REFRESH_INTERVAL_MS);
+
     // Parallel Web Speech for immediate (<100 ms) interim display
     startParallelWebSpeechRef.current();
   }, [startMonitoring]);
@@ -702,6 +724,10 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     if (heartbeatRef.current) {
       clearInterval(heartbeatRef.current);
       heartbeatRef.current = null;
+    }
+    if (tokenRefreshTimerRef.current) {
+      clearInterval(tokenRefreshTimerRef.current);
+      tokenRefreshTimerRef.current = null;
     }
 
     monitorMeterRef.current?.destroy();

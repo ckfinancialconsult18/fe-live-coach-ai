@@ -3,21 +3,23 @@
 This application requires a **persistent Node.js server** (not serverless) because it uses
 a custom WebSocket proxy for Deepgram streaming transcription. Vercel is not compatible.
 
+Deploy to **Railway** — the sole supported target platform.
+
 ---
 
-## Quick Start — Railway (Recommended)
+## Quick Start — Railway
 
 1. Push this repository to GitHub.
 2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub repo.
 3. Set environment variables (see below).
-4. Railway will detect `railway.toml` and deploy automatically.
+4. Railway will detect `railway.toml` and deploy automatically using the Dockerfile.
 
 ---
 
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` for local development. In production, set these
-in your platform's dashboard — **never commit real values to the repository**.
+in the Railway dashboard — **never commit real values to the repository**.
 
 | Variable | Required | Description |
 |---|---|---|
@@ -25,7 +27,7 @@ in your platform's dashboard — **never commit real values to the repository**.
 | `DEEPGRAM_API_KEY` | ✅ | Deepgram API key for real-time transcription — **server-side only, never expose to browser** |
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL (no path suffix) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Supabase anon/public key (safe to expose) |
-| `NEXT_PUBLIC_SITE_URL` | ✅ | Your public-facing URL (for auth redirect emails) |
+| `NEXT_PUBLIC_SITE_URL` | ✅ | Your public-facing Railway URL (for auth redirect emails) |
 | `NODE_ENV` | ✅ | Set to `production` |
 | `HOSTNAME` | ✅ | Set to `0.0.0.0` (bind to all interfaces in a container) |
 | `PORT` | optional | Server port (default: 3000) |
@@ -33,9 +35,7 @@ in your platform's dashboard — **never commit real values to the repository**.
 
 ---
 
-## Platform Instructions
-
-### Railway
+## Deploying to Railway
 
 ```bash
 # Install Railway CLI
@@ -58,69 +58,7 @@ railway variables set HOSTNAME=0.0.0.0
 railway up
 ```
 
-Health check: `GET /api/health` — Railway uses this to determine readiness.
-
----
-
-### Fly.io
-
-```bash
-# Install flyctl
-curl -L https://fly.io/install.sh | sh
-
-# Authenticate and create app
-fly auth login
-fly launch --no-deploy   # creates fly.toml (already in repo — skip if prompted)
-
-# Set secrets
-fly secrets set OPENAI_API_KEY=sk-proj-...
-fly secrets set DEEPGRAM_API_KEY=...
-fly secrets set NEXT_PUBLIC_SUPABASE_URL=https://...
-fly secrets set NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-fly secrets set NEXT_PUBLIC_SITE_URL=https://your-app.fly.dev
-
-# Deploy
-fly deploy
-```
-
-> **WebSocket note:** With multiple Fly machines, enable session affinity so all WebSocket
-> requests from one browser route to the same machine:
-> `fly proxy --sticky` (or set `[http_service] sticky = true` in fly.toml).
-
----
-
-### Render
-
-1. Connect your GitHub repo at [render.com](https://render.com).
-2. Select "Web Service" — **not** "Static Site".
-3. Render will detect `render.yaml` automatically.
-4. Set environment variables in the Render dashboard.
-5. **Use a paid plan** (Starter $7/mo minimum) — the free tier has a 15-minute idle
-   spin-down that kills active WebSocket connections mid-call.
-
----
-
-### Docker (any VPS / ECS / GKE)
-
-```bash
-# Build
-docker build -t fe-live-coach-ai .
-
-# Run
-docker run -d \
-  -p 3000:3000 \
-  -e NODE_ENV=production \
-  -e HOSTNAME=0.0.0.0 \
-  -e OPENAI_API_KEY=sk-proj-... \
-  -e DEEPGRAM_API_KEY=... \
-  -e NEXT_PUBLIC_SUPABASE_URL=https://... \
-  -e NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ... \
-  -e NEXT_PUBLIC_SITE_URL=https://your-domain.com \
-  --name live-coach \
-  fe-live-coach-ai
-```
-
-The Docker image includes a `HEALTHCHECK` directive that probes `GET /api/health`.
+Health check: `GET /api/health` — Railway polls this to determine readiness.
 
 ---
 
@@ -139,11 +77,11 @@ This keeps the Supabase access token out of server access logs and browser histo
 
 ### Scaling beyond one instance
 
-At ~500+ concurrent agents, run 2+ instances with sticky-session load balancing:
-- **Railway:** Not yet supported natively — use a single large instance or migrate to Fly.io.
-- **Fly.io:** Set `[http_service] sticky = true` in `fly.toml`.
-- **AWS ALB:** Enable `stickiness.enabled = true` with `lb_cookie` stickiness.
-- **nginx:** `ip_hash` upstream directive.
+At ~500+ concurrent agents, consider vertical scaling first (Railway large instances).
+For horizontal scale, sticky sessions are required because WebSocket state is in-process:
+
+- **Railway:** Not yet supported natively — use a single large instance or migrate to a
+  platform with sticky-session load balancing (Fly.io with `[http_service] sticky = true`).
 
 For true horizontal scaling without sticky sessions, move WebSocket state to Redis
 Pub/Sub so any instance can proxy audio to the correct Deepgram session.
@@ -156,26 +94,35 @@ Before going to production:
 
 - [ ] Rotate all API keys if they were ever committed to git or shared
 - [ ] Set `NEXT_PUBLIC_SITE_URL` to your real production domain
-- [ ] Enable Supabase Row Level Security on all tables
+- [ ] Enable Supabase Row Level Security on all tables (already done — 27/27 tables)
 - [ ] Set up Supabase auth redirect allowlist to your production domain only
-- [ ] Consider adding a WAF (Cloudflare, AWS WAF) in front of the app for DDoS protection
+- [ ] Consider adding Cloudflare in front of the app for DDoS protection
 - [ ] Review Deepgram account concurrency limits for your expected agent count
 - [ ] Enable OpenAI spend limits / alerts to cap unexpected costs
 
 ---
 
-## Health Check
+## Health & Version Endpoints
 
 `GET /api/health` returns:
 
 ```json
 {
   "status": "ok",
-  "timestamp": "2026-07-05T12:00:00.000Z",
+  "timestamp": "2026-07-06T12:00:00.000Z",
   "uptime": 3600,
   "environment": "production"
 }
 ```
 
-Returns `503` during graceful shutdown so load balancers stop routing before the
-process exits.
+Returns `503` during graceful shutdown so Railway stops routing before the process exits.
+
+`GET /api/version` returns:
+
+```json
+{
+  "version": "1.0.0",
+  "node": "v22.0.0",
+  "environment": "production"
+}
+```

@@ -1,10 +1,31 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getPersona } from '@/lib/roleplay-personas';
+import { requireUser } from '@/lib/api/guard';
+import { checkRateLimit, roleplayLimiter } from '@/lib/rate-limit';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
+  const { user, response } = await requireUser();
+  if (!user) return response;
+
+  const rl = checkRateLimit(roleplayLimiter, user.id);
+  if (!rl.allowed) {
+    const retryAfterSec = Math.ceil(rl.retryAfterMs / 1000);
+    return NextResponse.json(
+      { error: 'Too many requests. Please wait before continuing.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSec),
+          'X-RateLimit-Limit': '60',
+          'X-RateLimit-Window': '60',
+        },
+      },
+    );
+  }
+
   const { personaId, messages, turnCount = 0, rapportTrend = 'neutral' } = await req.json() as {
     personaId: string;
     messages: { role: 'agent' | 'prospect'; text: string }[];
@@ -14,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   const persona = getPersona(personaId);
   if (!persona) {
-    return new Response(JSON.stringify({ error: 'Unknown persona' }), { status: 400 });
+    return NextResponse.json({ error: 'Unknown persona' }, { status: 400 });
   }
 
   // Build the conversation history for the model

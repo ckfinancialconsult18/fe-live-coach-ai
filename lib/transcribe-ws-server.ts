@@ -358,7 +358,25 @@ export async function handleTranscribeWs(
     }
 
     // ── Audio phase: only binary blobs after auth ─────────────────────────
-    if (!isBinary) return; // ignore stray text frames after auth
+
+    // Handle mid-session token refresh (for calls longer than 1 hour).
+    // Client sends { type: 'reauth', token } every 45 min to keep the session valid.
+    if (!isBinary) {
+      let reauth: { type: string; token?: string };
+      try { reauth = JSON.parse(data.toString()) as { type: string; token?: string }; }
+      catch { return; }
+      if (reauth.type === 'reauth' && reauth.token) {
+        const newId = await verifySupabaseToken(reauth.token);
+        if (newId && newId === userId) {
+          console.log(`[transcribe-ws] token refreshed — userId=${userId}`);
+        } else {
+          console.warn(`[transcribe-ws] reauth failed — closing — userId=${userId}`);
+          sendToClient(clientWs, { type: 'error', message: 'Token refresh failed — please restart the call.' });
+          teardown(4001, 'Reauth failed');
+        }
+      }
+      return;
+    }
 
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
     if (buf.length === 0) return;

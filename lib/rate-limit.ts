@@ -110,3 +110,6 @@ export const transcribeLimiter = createRateLimiter('transcribe', 120, 60_000);
 
 // WebSocket connections: max 10 new connections per IP per minute.
 export const wsConnectionLimiter = createRateLimiter('ws-connect', 10, 60_000);
+
+// Roleplay endpoint: max 60 requests per user per minute (streaming turns are fast).
+export const roleplayLimiter = createRateLimiter('roleplay', 60, 60_000);
