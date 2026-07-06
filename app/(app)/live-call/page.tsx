@@ -21,6 +21,7 @@ import { useMicrophone } from '@/hooks/useMicrophone';
 import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
+import { SubscriptionGate } from '@/components/billing/SubscriptionGate';
 import type { CallMetrics, TimelineEvent, TimelineEventCategory, PostCallReport as PostCallReportType } from '@/lib/types';
 import { scoreColor } from '@/lib/score-color';
 
@@ -57,6 +58,17 @@ function PreflightPanel({ result, onDismiss }: { result: PreflightResult; onDism
 }
 
 export default function LiveCallPage() {
+  return (
+    <SubscriptionGate
+      featureName="Live Call AI"
+      featureDescription="Get real-time AI coaching, live transcription, and post-call analysis on every sales call."
+    >
+      <LiveCallPageInner />
+    </SubscriptionGate>
+  );
+}
+
+function LiveCallPageInner() {
   const mic = useMicrophone();
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,

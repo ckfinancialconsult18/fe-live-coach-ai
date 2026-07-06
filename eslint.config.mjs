@@ -22,6 +22,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Compiled server bundle — uses require(), not part of the TS source
+    "server.js",
   ]),
 ]);
 

@@ -1,56 +1,64 @@
-# ── Stage 1: dependencies ────────────────────────────────────────────────────
+# ── Stage 1: install all dependencies (including devDeps for build) ───────────
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install OS-level deps needed by some npm packages (pdf-parse, canvas, etc.)
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json* ./
-# Install all deps (including devDeps needed for tsx and build)
 RUN npm ci
 
-# ── Stage 2: build ────────────────────────────────────────────────────────────
+# ── Stage 2: build Next.js + compile server.ts → server.js ───────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build the Next.js application
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build the Next.js application (output: standalone)
 RUN npm run build
 
-# ── Stage 3: production runner ────────────────────────────────────────────────
+# Compile server.ts and its TypeScript imports into a single server.js.
+# --packages=external keeps all node_modules as runtime require() calls.
+# --bundle folds in lib/transcribe-ws-server.ts and app/api/health/route.ts.
+# No tsx, no on-the-fly transpilation in production.
+RUN node_modules/.bin/esbuild server.ts \
+      --bundle \
+      --platform=node \
+      --target=node20 \
+      --packages=external \
+      --outfile=server.js
+
+# ── Stage 3: minimal production runner ────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Create a non-root user for security
 RUN addgroup --system --gid 1001 nodejs \
  && adduser  --system --uid 1001 nextjs
 
-# Copy built assets
+# Next.js standalone output (includes its own minimal node_modules)
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy server.ts runtime dependencies (tsx + server files)
-COPY --from=builder /app/server.ts ./server.ts
-COPY --from=builder /app/lib ./lib
-COPY --from=builder /app/app/api/health ./app/api/health
+# Compiled server entry point (no tsx needed — plain Node.js)
+COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
+
+# Runtime node_modules for server.js dependencies (ws, next, @supabase/*, stripe, etc.)
+# These are external to the bundle and must be present at runtime.
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 USER nextjs
 
 EXPOSE 3000
 
-# Health check — used by Docker, Railway, Fly.io, and Kubernetes
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/health || exit 1
 
-# Start the custom server (handles both HTTP and WebSocket)
-CMD ["node_modules/.bin/tsx", "server.ts"]
+# Plain Node.js — no tsx, no TypeScript runtime overhead
+CMD ["node", "server.js"]

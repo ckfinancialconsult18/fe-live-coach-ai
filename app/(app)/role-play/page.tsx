@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { SubscriptionGate } from '@/components/billing/SubscriptionGate';
 import { useRolePlay } from '@/hooks/useRolePlay';
 import { useAICoach } from '@/hooks/useAICoach';
 import { PERSONAS, DIFFICULTY_CONFIG, type PersonaDifficulty } from '@/lib/roleplay-personas';
@@ -338,6 +339,17 @@ const COACH_TAB_LABELS: Record<CoachTab, string> = {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function RolePlayPage() {
+  return (
+    <SubscriptionGate
+      featureName="AI Role Play Trainer"
+      featureDescription="Practice with 22 AI personas and get real-time coaching feedback on your sales technique."
+    >
+      <RolePlayPageInner />
+    </SubscriptionGate>
+  );
+}
+
+function RolePlayPageInner() {
   const { session, phase, isProspectTyping, transcript, startSession, sendAgentMessage, endSession, resetSession, durationSeconds } = useRolePlay();
   const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, liveScores, missedOpportunities, liveObjectionState, liveClosingState } = useAICoach(transcript);
 

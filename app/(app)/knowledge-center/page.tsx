@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, DragEvent, ChangeEvent } from 'react';
+import DOMPurify from 'dompurify';
 import { scoreColor } from '@/lib/score-color';
 import type { PipelineJob, PendingEntryIndex, PendingKnowledgeEntry, PipelineStats, SearchResult } from '@/lib/pipeline/types';
 
@@ -838,8 +839,20 @@ function SearchTab() {
     }
   }, [query, search]);
 
-  const highlighted = (text: string) =>
-    text.replace(/\*\*(.+?)\*\*/g, '<mark class="bg-[rgba(212,175,55,0.25)] text-[#D4AF37] rounded px-0.5">$1</mark>');
+  const highlighted = (text: string) => {
+    // Escape raw HTML first, then promote **bold** to <mark>.
+    // DOMPurify with a strict allowlist ensures no scripts or foreign tags survive.
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const withMarks = escaped.replace(
+      /\*\*(.+?)\*\*/g,
+      (_, m) => `<mark class="bg-[rgba(212,175,55,0.25)] text-[#D4AF37] rounded px-0.5">${m}</mark>`,
+    );
+    return DOMPurify.sanitize(withMarks, { ALLOWED_TAGS: ['mark'], ALLOWED_ATTR: ['class'] });
+  };
 
   return (
     <div className="p-6 space-y-4 max-w-4xl mx-auto">
