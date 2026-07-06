@@ -177,9 +177,12 @@ function PartialRow({ partial }: { partial: PartialTranscript }) {
     while (commonLen < minLen && prev[commonLen] === next[commonLen]) commonLen++;
 
     if (next.length <= commonLen) {
-      // Deepgram corrected to something shorter — snap, no animation
+      // Deepgram corrected to something shorter — snap on the next frame
+      // (must not call setState synchronously in an effect body)
       displayedRef.current = next;
-      setDisplayed(next);
+      rafRef.current = requestAnimationFrame(() => {
+        if (targetRef.current === next) setDisplayed(next);
+      });
       return;
     }
 

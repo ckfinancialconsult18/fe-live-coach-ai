@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
+import { checkRateLimit, transcribeLimiter } from '@/lib/rate-limit';
 
 interface DeepgramWord {
   word: string;
@@ -101,6 +102,21 @@ export async function POST(req: NextRequest) {
     return authResponse;
   }
   console.log('[transcribe][0] auth OK — userId:', user.id);
+
+  // Rate limiting
+  const rl = checkRateLimit(transcribeLimiter, user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded on transcription endpoint.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),
+          'X-RateLimit-Limit': String(transcribeLimiter.maxRequests),
+        },
+      },
+    );
+  }
 
   // ── Step 1: env var check ───────────────────────────────────────────────────
   const apiKey = process.env.DEEPGRAM_API_KEY;

@@ -4,6 +4,7 @@ import { openai } from '@/lib/openai';
 import { COACH_SYSTEM_PROMPT, UNDERWRITING_EXTRACT_PROMPT, STAGE_DETECTION_PROMPT } from '@/lib/coach-prompts';
 import { requireUser } from '@/lib/api/guard';
 import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
+import { checkRateLimit, coachLimiter, interimCoachLimiter } from '@/lib/rate-limit';
 
 const VALID_STAGES = ['introduction', 'permission', 'discovery', 'existing_coverage', 'health', 'budget', 'presentation', 'objections', 'close'];
 
@@ -35,7 +36,32 @@ export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
-  const { transcript, fullLength: _fullLength, memory, lastNBA, isInterim } = await req.json() as {
+  // Rate limiting: keyed by userId so limits are per-authenticated-user, not per-IP.
+  // Interim calls (gpt-4o-mini) get a higher allowance than full confirmed calls.
+  const body = await req.json() as {
+    transcript: string;
+    fullLength: number;
+    memory?: Record<string, unknown>;
+    lastNBA?: { actionType: string; nextQuestion: string } | null;
+    isInterim?: boolean;
+  };
+  const limiter = body.isInterim ? interimCoachLimiter : coachLimiter;
+  const rl = checkRateLimit(limiter, user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Please wait before requesting more coaching.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)),
+          'X-RateLimit-Limit': String(limiter.maxRequests),
+          'X-RateLimit-Window': String(limiter.windowMs / 1000),
+        },
+      },
+    );
+  }
+
+  const { transcript, fullLength: _fullLength, memory, lastNBA, isInterim } = body as {
     transcript: string;
     fullLength: number;
     memory?: Record<string, unknown>;

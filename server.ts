@@ -27,7 +27,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'node:url';
 import next from 'next';
 import { WebSocketServer } from 'ws';
-import { handleTranscribeWs } from './lib/transcribe-ws-server';
+import { handleTranscribeWs, closeAllConnections, getActiveConnectionCount } from './lib/transcribe-ws-server';
+import { markShuttingDown } from './app/api/health/route';
 
 // Load .env.local into process.env before anything else.
 // Next.js does this automatically for its own route handlers, but server.ts
@@ -47,8 +48,17 @@ function loadEnvLocal() {
 }
 loadEnvLocal();
 
+// ── Global error handlers ──────────────────────────────────────────────────
+// Prevent an unhandled rejection from crashing the process in production.
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason);
+});
+
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.HOSTNAME ?? 'localhost';
+const hostname = process.env.HOSTNAME ?? (dev ? 'localhost' : '0.0.0.0');
 const port = parseInt(process.env.PORT ?? '3000', 10);
 
 const app = next({ dev, hostname, port });
@@ -61,7 +71,6 @@ app.prepare().then(() => {
   });
 
   // WebSocket server handles /api/transcribe-ws upgrades on the same port.
-  // All other upgrade requests (HMR socket, etc.) are destroyed.
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -71,17 +80,69 @@ app.prepare().then(() => {
         void handleTranscribeWs(ws, req);
       });
     }
-    // All other WebSocket paths (e.g. /_next/webpack-hmr for HMR) are left
-    // unhandled here — Next.js attaches its own upgrade listener that picks
-    // them up. Destroying them would break hot reload in development.
+    // Other WebSocket paths (e.g. /_next/webpack-hmr for HMR) are left
+    // unhandled here — Next.js attaches its own upgrade listener.
+    // Do NOT destroy them — that would break hot reload in development.
   });
 
-  httpServer.listen(port, () => {
-    console.log(
-      `> Ready on http://${hostname}:${port} [${dev ? 'development' : 'production'}]`
-    );
+  httpServer.listen(port, hostname, () => {
+    console.log(`> Ready on http://${hostname}:${port} [${dev ? 'development' : 'production'}]`);
     console.log('> Deepgram streaming WS endpoint: /api/transcribe-ws');
+    if (!dev) {
+      console.log('> Health check: GET /api/health');
+    }
   });
+
+  // ── Graceful shutdown ────────────────────────────────────────────────────
+  // SIGTERM is sent by Railway, Fly.io, Docker, and Kubernetes on stop/deploy.
+  // SIGINT is Ctrl+C in development.
+  //
+  // Shutdown sequence:
+  //  1. Tell health check to return 503 so load balancer stops routing here.
+  //  2. Stop accepting new WebSocket connections.
+  //  3. Notify all connected WS clients ("server shutting down").
+  //  4. Close client WS and Deepgram WS connections.
+  //  5. Close HTTP server (drain existing keep-alive connections).
+  //  6. Exit with code 0.
+
+  const SHUTDOWN_TIMEOUT_MS = 15_000; // force-exit after 15s if draining stalls
+
+  async function gracefulShutdown(signal: string) {
+    console.log(`\n[server] received ${signal} — starting graceful shutdown`);
+
+    // Step 1: health check → 503
+    markShuttingDown();
+
+    // Step 2 + 3 + 4: close all WebSocket connections
+    const count = getActiveConnectionCount();
+    if (count > 0) {
+      console.log(`[server] notifying ${count} active WebSocket client(s)…`);
+    }
+    closeAllConnections('Server shutting down');
+
+    // Force-exit guard
+    const forceExit = setTimeout(() => {
+      console.error('[server] shutdown timed out — forcing exit');
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref(); // don't keep event loop alive just for this
+
+    // Step 5: close HTTP server (stops accepting new connections, drains existing)
+    await new Promise<void>((resolve) => {
+      httpServer.close((err) => {
+        if (err) console.error('[server] httpServer.close error:', err);
+        resolve();
+      });
+    });
+
+    clearTimeout(forceExit);
+    console.log('[server] shutdown complete — exiting');
+    process.exit(0);
+  }
+
+  process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+  process.on('SIGINT',  () => void gracefulShutdown('SIGINT'));
+
 }).catch((err: unknown) => {
   console.error('Failed to start custom server:', err);
   process.exit(1);

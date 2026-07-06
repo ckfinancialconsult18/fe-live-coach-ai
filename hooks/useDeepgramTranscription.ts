@@ -102,7 +102,7 @@ interface DgWord {
 }
 
 interface WsServerMessage {
-  type: 'connected' | 'interim' | 'final' | 'error' | 'speech-started';
+  type: 'auth_required' | 'connected' | 'interim' | 'final' | 'error' | 'speech-started';
   transcript?: string;
   words?: DgWord[];
   confidence?: number;
@@ -173,6 +173,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [silenceWarning, setSilenceWarning] = useState<string | null>(null);
+  const [recorderIntervalMs, setRecorderIntervalMs] = useState(DEFAULT_TIMESLICE_MS);
 
   const audioManager = useAudioInputManager(mic);
 
@@ -468,7 +469,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   // ── openTranscribeWs ──────────────────────────────────────────────────────
   // Opens a browser WebSocket to /api/transcribe-ws (served by server.ts).
-  // The server proxies audio to Deepgram's streaming API and relays events back.
+  // Auth is sent as the first message after open (not in the URL) so the token
+  // never appears in server access logs or browser history.
+  //
+  // New handshake sequence:
+  //  1. WS opens → server sends { type: 'auth_required' }
+  //  2. Client sends { type: 'auth', token: '<access_token>' }
+  //  3. Server validates, opens Deepgram, sends { type: 'connected' }
+  //  4. Client starts MediaRecorder and begins sending audio blobs
 
   const openTranscribeWs = useCallback(async () => {
     if (!shouldReconnectRef.current) return;
@@ -477,13 +485,13 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     if (wsRef.current) {
       const old = wsRef.current;
       wsRef.current = null;
-      old.onclose = null; // prevent reconnect loop from old handler
+      old.onclose = null;
       if (old.readyState !== WebSocket.CLOSED && old.readyState !== WebSocket.CLOSING) {
         old.close(1000, 'Reopening');
       }
     }
 
-    // Auth: get the user's current Supabase access token
+    // Fetch auth token before opening — if we can't get one, fail fast
     const supabase = createSupabaseClient();
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -494,22 +502,17 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     }
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/api/transcribe-ws?token=${encodeURIComponent(token)}`;
+    // No token in URL — auth is sent as first message after open
+    const wsUrl = `${proto}//${window.location.host}/api/transcribe-ws`;
     console.log('[transcription] opening WebSocket to transcribe-ws proxy');
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[transcription] WebSocket open — starting MediaRecorder');
-      reconnectAttemptRef.current = 0;
-      setConnectionState('connected');
-      setTranscriptionMode('deepgram');
-      setError(null);
-      // Start the recorder now that the WS is ready.
-      // First ondataavailable will contain the WebM header — exactly what
-      // Deepgram needs to initialize its decoder.
-      startRecorderRef.current();
+      // Send auth immediately — server is waiting for this before opening Deepgram
+      ws.send(JSON.stringify({ type: 'auth', token }));
+      console.log('[transcription] WebSocket open — auth sent, waiting for Deepgram connection');
     };
 
     ws.onmessage = (event) => {
@@ -517,20 +520,28 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       try { msg = JSON.parse(event.data as string) as WsServerMessage; }
       catch { return; }
 
-      if (msg.type === 'connected') {
-        console.log('[transcription] Deepgram streaming session connected');
+      if (msg.type === 'auth_required') {
+        // Server is ready for auth (already sent in onopen, this is informational)
+        return;
+
+      } else if (msg.type === 'connected') {
+        // Deepgram session is ready — NOW start the recorder.
+        // First ondataavailable contains the WebM EBML header that Deepgram needs
+        // to initialize its decoder. Starting here ensures no audio is sent before
+        // Deepgram is ready to receive it.
+        reconnectAttemptRef.current = 0;
+        setConnectionState('connected');
+        setTranscriptionMode('deepgram');
+        setError(null);
+        console.log('[transcription] Deepgram streaming session connected — starting MediaRecorder');
+        startRecorderRef.current();
 
       } else if (msg.type === 'speech-started') {
-        // Deepgram VAD detected voice onset — log for debugging.
         console.log(`[transcription] DG SpeechStarted serverTs=${msg.serverTs}`);
 
       } else if (msg.type === 'interim') {
-        // ws-rtt: time from last audio chunk sent to this result arriving.
         if (lastSentAtRef.current > 0) emitPerf('ws-rtt', Date.now() - lastSentAtRef.current);
-        // deepgram-latency: server timestamp → browser receive (server→browser network only).
         if (msg.serverTs) emitPerf('deepgram-latency', Date.now() - msg.serverTs);
-        // Deepgram interim overrides the parallel Web Speech partial with higher
-        // accuracy text. Both sources set setPartial() — most recent wins.
         if (msg.transcript?.trim()) {
           setPartial({ speaker: 'agent', text: msg.transcript.trim() });
         }
@@ -548,7 +559,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
       } else if (msg.type === 'error') {
         console.error('[transcription] server error:', msg.message);
-        // 503-equivalent: fall back to Web Speech
         if (msg.message?.includes('DEEPGRAM_API_KEY')) {
           usingWebSpeechRef.current = true;
           if (parallelSpeechRef.current) {
@@ -567,23 +577,25 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       console.log(`[transcription] WebSocket closed — code=${event.code} reason=${event.reason}`);
       if (wsRef.current === ws) wsRef.current = null;
 
-      if (!shouldReconnectRef.current) return; // normal End Call path
+      if (!shouldReconnectRef.current) return;
 
       if (event.code === 4001) {
         setError('Authentication failed — please refresh the page.');
         setConnectionState('failed');
         return;
       }
+      if (event.code === 4029) {
+        setError('Too many connections. Please wait before starting a new call.');
+        setConnectionState('failed');
+        return;
+      }
 
-      // Reconnect with exponential back-off
       if (reconnectAttemptRef.current < MAX_RECONNECT) {
         reconnectAttemptRef.current++;
         setConnectionState('reconnecting');
         const delay = Math.min(500 * reconnectAttemptRef.current, 3000);
         console.log(`[transcription] reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current}/${MAX_RECONNECT})`);
 
-        // Stop the current recorder so the reconnected session gets a fresh
-        // WebM stream starting from the header
         if (recorderRef.current?.state !== 'inactive') {
           recorderRef.current?.stop();
         }
@@ -599,7 +611,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     };
 
     ws.onerror = () => {
-      // onclose fires immediately after onerror — reconnect logic lives there
       console.error('[transcription] WebSocket error');
     };
   }, [addLine]);
@@ -623,6 +634,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     // Snapshot interval once per call so mid-call localStorage changes don't
     // take effect until the next call.
     activeIntervalMsRef.current = readStoredInterval();
+    setRecorderIntervalMs(activeIntervalMsRef.current);
 
     // MediaRecorder unavailable → fall back to Web Speech only
     if (typeof window === 'undefined' || !window.MediaRecorder) {
@@ -786,6 +798,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     disableSpeakerMode: audioManager.releaseSpeakerMode,
     audioWarning: audioManager.warning,
     silenceWarning,
-    recorderIntervalMs: activeIntervalMsRef.current,
+    recorderIntervalMs,
   };
 }

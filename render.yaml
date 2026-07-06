@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: fe-live-coach-ai
+    runtime: node
+    plan: starter          # upgrade to standard or pro for persistent WebSockets
+    region: oregon         # or frankfurt / singapore
+    branch: main
+
+    buildCommand: npm ci && npm run build
+    startCommand: node_modules/.bin/tsx server.ts
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOSTNAME
+        value: 0.0.0.0
+      # Set these from the Render dashboard (never commit real values):
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+
+    # IMPORTANT: Render's free tier has 15-minute idle spin-down which kills
+    # active WebSocket connections. Use at minimum the Starter ($7/mo) plan
+    # to keep the service always-on.
