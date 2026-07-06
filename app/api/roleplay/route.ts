@@ -4,9 +4,8 @@ import { getPersona } from '@/lib/roleplay-personas';
 import { requireUser } from '@/lib/api/guard';
 import { checkRateLimit, roleplayLimiter } from '@/lib/rate-limit';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 export async function POST(req: NextRequest) {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const { user, response } = await requireUser();
   if (!user) return response;
 
