@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/(auth)/actions';
+import { useSubscription } from '@/hooks/useSubscription';
 
 type MeResponse = {
   user: { email: string; fullName: string | null; role: string };
@@ -33,6 +34,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const [me, setMe] = useState<MeResponse | null>(null);
+  const { status, planName, isActive, currentPeriodEnd } = useSubscription();
 
   useEffect(() => {
     fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then(setMe).catch(() => setMe(null));
@@ -127,13 +129,20 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               </div>
             ))}
           </div>
-          <div className="rounded-lg px-2.5 py-2 bg-[rgba(212,175,55,0.08)] border border-[rgba(212,175,55,0.2)] mt-1.5">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-slate-400">Subscription</p>
-              <span className="text-[9px] font-bold text-[#D4AF37] bg-[rgba(212,175,55,0.15)] px-1.5 py-0.5 rounded-full">PRO</span>
+          {isActive && (
+            <div className="rounded-lg px-2.5 py-2 bg-[rgba(212,175,55,0.08)] border border-[rgba(212,175,55,0.2)] mt-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-slate-400">Subscription</p>
+                <span className="text-[9px] font-bold text-[#D4AF37] bg-[rgba(212,175,55,0.15)] px-1.5 py-0.5 rounded-full">
+                  {planName === 'agency' ? 'AGENCY' : 'PRO'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5 font-medium">
+                {status === 'trialing' ? 'Trial' : 'Active'}
+                {currentPeriodEnd ? ` — renews ${currentPeriodEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+              </p>
             </div>
-            <p className="text-xs text-slate-300 mt-0.5 font-medium">Active — renews Jul 29</p>
-          </div>
+          )}
         </div>
       )}
 
