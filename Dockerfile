@@ -66,4 +66,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/health || exit 1
 
 # Plain Node.js — no tsx, no TypeScript runtime overhead
-CMD ["node", "server.js"]
+# Shell form so we can print env before starting (diagnose spurious NODE_OPTIONS)
+CMD echo "=== DIAG ===" && echo "NODE_OPTIONS=$NODE_OPTIONS" && echo "PATH=$PATH" && node --version && node server.js
