@@ -53,6 +53,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
+# Remove devDependencies that must not run in production.
+# tsx auto-registers itself as a Node.js ESM hook when imported, which hijacks
+# module resolution and causes "Cannot find module server.ts" at startup.
+RUN rm -rf ./node_modules/tsx ./node_modules/.bin/tsx
+
 USER nextjs
 
 EXPOSE 3000
