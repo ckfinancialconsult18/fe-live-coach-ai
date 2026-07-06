@@ -30,6 +30,11 @@ RUN node_modules/.bin/esbuild server.ts \
       --packages=external \
       --outfile=server.js
 
+# Strip devDependencies (tsx, typescript, eslint, tailwindcss, etc.) from node_modules
+# BEFORE copying to the runner stage. tsx must not be present at runtime because
+# its main export auto-registers a Node.js ESM hook that hijacks server.js → server.ts.
+RUN npm prune --production
+
 # ── Stage 3: minimal production runner ────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -49,14 +54,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
 
 # Runtime node_modules for server.js dependencies (ws, next, @supabase/*, stripe, etc.)
-# These are external to the bundle and must be present at runtime.
+# devDependencies (including tsx) were pruned in the builder stage — not present here.
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
-
-# Remove devDependencies that must not run in production.
-# tsx auto-registers itself as a Node.js ESM hook when imported, which hijacks
-# module resolution and causes "Cannot find module server.ts" at startup.
-RUN rm -rf ./node_modules/tsx ./node_modules/.bin/tsx
 
 USER nextjs
 
@@ -66,5 +66,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/health || exit 1
 
 # Plain Node.js — no tsx, no TypeScript runtime overhead
-# Shell form so we can print env before starting (diagnose spurious NODE_OPTIONS)
-CMD echo "=== DIAG ===" && echo "NODE_OPTIONS=$NODE_OPTIONS" && echo "PATH=$PATH" && node --version && node server.js
+CMD ["node", "server.js"]
