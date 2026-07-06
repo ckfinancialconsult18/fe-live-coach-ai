@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
 import { createClient } from '@/lib/supabase/server';
+import { createRateLimiter, checkRateLimit } from '@/lib/rate-limit';
 import {
   SCORE_WEIGHTS,
   SCORE_WEIGHT_LABELS,
@@ -57,6 +58,10 @@ interface PostCallRequestBody {
   callId?: string | null;
   timeline?: TimelineEvent[];
 }
+
+// Post-call analysis is the most expensive OpenAI call in the app — rate-limit
+// to 10 per user per hour to prevent quota exhaustion from repeated submissions.
+const postCallLimiter = createRateLimiter('post-call', 10, 60 * 60_000);
 
 function computeRealMetrics(lines: TranscriptLine[]) {
   const agentLines = lines.filter((l) => l.speaker === 'agent');
@@ -270,6 +275,17 @@ export async function POST(req: NextRequest) {
   if (!user) {
     console.error('[post-call][0] auth failed:', authError?.message);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const rl = checkRateLimit(postCallLimiter, user.id);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many post-call analyses. Please wait before submitting another.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) },
+      },
+    );
   }
 
   const body = await req.json() as PostCallRequestBody;
