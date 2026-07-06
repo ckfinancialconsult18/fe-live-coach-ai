@@ -28,7 +28,7 @@ import { parse } from 'node:url';
 import next from 'next';
 import { WebSocketServer } from 'ws';
 import { handleTranscribeWs, closeAllConnections, getActiveConnectionCount } from './lib/transcribe-ws-server';
-import { markShuttingDown } from './app/api/health/route';
+import { markShuttingDown } from './lib/shutdown-state';
 
 // Load .env.local into process.env before anything else.
 // Next.js does this automatically for its own route handlers, but server.ts
