@@ -36,7 +36,7 @@ const PLANS: { id: PlanId; name: string; price: number; desc: string; features: 
   {
     id: 'professional',
     name: 'Professional',
-    price: 99,
+    price: 49,
     desc: 'For individual agents',
     features: [
       'Real-time AI coaching during live calls',
@@ -49,7 +49,7 @@ const PLANS: { id: PlanId; name: string; price: number; desc: string; features: 
   {
     id: 'agency',
     name: 'Agency',
-    price: 249,
+    price: 99,
     desc: 'For agencies & teams',
     features: [
       'Everything in Professional',

@@ -635,8 +635,8 @@ function UsersTab() {
 // ── Billing Tab ───────────────────────────────────────────────────────────────
 
 const PLAN_DETAILS: Record<string, { name: string; price: number }> = {
-  professional: { name: 'Professional', price: 99 },
-  agency:       { name: 'Agency',       price: 249 },
+  professional: { name: 'Professional', price: 49 },
+  agency:       { name: 'Agency',       price: 99 },
 };
 
 function BillingTab() {
