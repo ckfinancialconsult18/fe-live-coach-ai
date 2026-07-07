@@ -48,12 +48,22 @@ export function isPlaylist(url: string): boolean {
 export async function fetchYouTubeMetadata(url: string): Promise<{
   id: string; title: string; channel: string; duration: number; thumbnail: string;
 }> {
-  const { stdout } = await execAsync(
-    `yt-dlp --print "%(id)s\t%(title)s\t%(channel)s\t%(duration)s\t%(thumbnail)s" --no-playlist "${url}"`,
-    { timeout: 30000 }
-  );
-  const [id, title, channel, duration, thumbnail] = stdout.trim().split('\t');
-  return { id, title: title ?? 'Untitled', channel: channel ?? 'Unknown', duration: parseInt(duration ?? '0'), thumbnail: thumbnail ?? '' };
+  const videoId = extractYouTubeId(url);
+  if (!videoId) throw new Error('Could not parse YouTube video ID');
+
+  // Use oEmbed — no API key required, not rate-limited like yt-dlp
+  const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+  const res = await fetch(oembedUrl, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`YouTube oEmbed returned ${res.status}`);
+  const data = await res.json() as { title?: string; author_name?: string; thumbnail_url?: string };
+
+  return {
+    id: videoId,
+    title: data.title ?? 'Untitled',
+    channel: data.author_name ?? 'Unknown',
+    duration: 0, // oEmbed doesn't provide duration; stored as 0 until transcription
+    thumbnail: data.thumbnail_url ?? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+  };
 }
 
 export async function fetchPlaylistUrls(playlistUrl: string): Promise<string[]> {
