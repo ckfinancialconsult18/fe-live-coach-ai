@@ -23,6 +23,38 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ url: signed.signedUrl, title: doc.title, mimeType: doc.mime_type });
 }
 
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
+
+  const body = await request.json().catch(() => ({})) as {
+    title?: string;
+    tags?: string[];
+    category_id?: string | null;
+    archived?: boolean;
+    source_type?: string;
+  };
+
+  const allowed = ['title', 'tags', 'category_id', 'archived', 'source_type'] as const;
+  const patch: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (key in body) patch[key] = (body as Record<string, unknown>)[key];
+  }
+  if (!Object.keys(patch).length) return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+
+  const { data, error } = await (supabase as any)
+    .from('knowledge_documents')
+    .update(patch)
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
+}
+
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, user, response } = await requireUser();
