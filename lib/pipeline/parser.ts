@@ -11,6 +11,7 @@ const VTT_LINE = /^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})
 
 export function detectFormat(filename: string): TranscriptFormat {
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return 'image';
   if (ext === 'docx') return 'docx';
   if (ext === 'pdf') return 'pdf';
   if (ext === 'vtt' || filename.toLowerCase().includes('zoom')) return 'zoom';
@@ -26,6 +27,7 @@ export async function parseTranscript(
   filename: string
 ): Promise<ParsedTranscript> {
   switch (format) {
+    case 'image': return parseImage(buffer, filename);
     case 'pdf':   return parsePdf(buffer);
     case 'docx':  return parseDocx(buffer);
     case 'zoom':  return parseZoom(buffer.toString('utf-8'), filename);
@@ -33,6 +35,39 @@ export async function parseTranscript(
     case 'meet':  return parseMeet(buffer.toString('utf-8'));
     default:      return parsePlainText(buffer.toString('utf-8'), format);
   }
+}
+
+async function parseImage(buffer: Buffer, filename: string): Promise<ParsedTranscript> {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? 'png';
+  const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+  const mime = mimeMap[ext] ?? 'image/png';
+  const b64 = buffer.toString('base64');
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const OpenAI = require('openai').default ?? require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 4096,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'This is a screenshot of a sales script or coaching material. Extract ALL text exactly as shown, preserving structure, headings, bullet points, and flow. Then provide a clean structured version of the script content below the extracted text. Return plain text only.',
+          },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}`, detail: 'high' } },
+        ],
+      },
+    ],
+  });
+
+  const text = completion.choices[0]?.message?.content ?? '';
+  if (!text.trim()) throw new Error('No text could be extracted from the image');
+  const words = text.trim().split(/\s+/).length;
+  return { text, lines: [], wordCount: words, format: 'image', metadata: { speakerCount: 0 } };
 }
 
 async function parsePdf(buffer: Buffer): Promise<ParsedTranscript> {

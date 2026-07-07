@@ -161,7 +161,7 @@ function UploadModal({ onClose, onUploaded }: { onClose: () => void; onUploaded:
     e.preventDefault();
     setDragOver(false);
     const dropped = Array.from(e.dataTransfer.files).filter((f) =>
-      /\.(pdf|docx|txt|md|csv)$/i.test(f.name)
+      /\.(pdf|docx|txt|md|csv|png|jpg|jpeg|webp)$/i.test(f.name)
     );
     setFiles((prev) => [...prev, ...dropped]);
   };
@@ -246,8 +246,8 @@ function UploadModal({ onClose, onUploaded }: { onClose: () => void; onUploaded:
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
                 </svg>
                 <p className="text-sm text-slate-400">Drag & drop or click to browse</p>
-                <p className="text-xs text-slate-600 mt-1">PDF, DOCX, TXT, MD, CSV — up to 25 MB</p>
-                <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.txt,.md,.csv" className="hidden" onChange={handleFileChange} />
+                <p className="text-xs text-slate-600 mt-1">PDF, DOCX, TXT, MD, CSV, PNG, JPG — up to 25 MB</p>
+                <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleFileChange} />
               </div>
 
               {files.length > 0 && (

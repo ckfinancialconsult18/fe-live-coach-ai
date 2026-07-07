@@ -1,4 +1,4 @@
-export type TranscriptFormat = 'txt' | 'md' | 'docx' | 'pdf' | 'zoom' | 'teams' | 'meet';
+export type TranscriptFormat = 'txt' | 'md' | 'docx' | 'pdf' | 'zoom' | 'teams' | 'meet' | 'image';
 
 export type JobStatus =
   | 'queued'
