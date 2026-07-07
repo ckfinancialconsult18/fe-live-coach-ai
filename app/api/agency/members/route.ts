@@ -60,7 +60,8 @@ export async function GET(req: NextRequest) {
   const calls = (callRows ?? []) as Array<{ user_id: string; outcome: string }>;
 
   // Build per-member stats
-  const STAGE_KEYS = ['introduction', 'permission', 'discovery', 'existingCoverage', 'health', 'budget', 'presentation', 'objections', 'closing'];
+  // Keys that exist in the call_scores.scores jsonb column (matches coach prompt)
+  const STAGE_KEYS = ['introduction', 'permission', 'discovery', 'existingCoverage', 'health', 'budget', 'presentation', 'objections', 'closing', 'rapport'];
 
   const memberStats = (members as any[]).map((m: any) => {
     const uid = m.user_id;

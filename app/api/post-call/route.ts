@@ -25,7 +25,11 @@ function computeWeightedScore(
   let totalWeighted = 0;
 
   for (const [key, weight] of Object.entries(SCORE_WEIGHTS)) {
-    const score = Math.max(0, Math.min(100, Math.round(categoryScores[key] ?? 50)));
+    let raw = categoryScores[key] ?? 50;
+    // Normalize: if the AI returned a 0-1 decimal or 0-10 scale, scale up to 0-100
+    if (raw > 0 && raw <= 1)   raw = raw * 100;
+    else if (raw > 1 && raw <= 10) raw = raw * 10;
+    const score = Math.max(0, Math.min(100, Math.round(raw)));
     const contribution = score * weight;
     totalWeighted += contribution;
     categories.push({

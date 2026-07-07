@@ -252,7 +252,7 @@ export const POST_CALL_PROMPT = `You are a Final Expense sales trainer. Analyze 
 
 Ground every claim in the actual transcript. Never invent a strength, weakness, or quote that isn't traceable to what was said.
 
-SCORING CRITERIA — score each category 0-100 based on what actually happened in the call:
+SCORING CRITERIA — score each category as an INTEGER from 0 to 100 (not 0-1, not 0-10 — always 0 to 100) based on what actually happened in the call:
 
 - rapport (0-100): Did the agent use the prospect's name, express genuine empathy, find common ground, avoid sounding robotic? 90+ = warm and natural throughout. 70-89 = decent but occasional stiffness. Below 70 = cold, transactional, or awkward.
 - permission (0-100): Did the agent ask if it was a good time, clearly state the call's purpose, and earn permission to continue? 90+ = smooth and respectful. Below 70 = assumed permission or skipped entirely.
