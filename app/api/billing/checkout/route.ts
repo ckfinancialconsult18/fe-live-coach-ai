@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (!user) return response;
 
   const stripe = getStripe();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+  const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
   const trialDays = parseInt(process.env.STRIPE_TRIAL_DAYS ?? '7', 10);
 
   const body = await req.json().catch(() => ({})) as { planId?: PlanId; returnPath?: string };
@@ -75,6 +75,10 @@ export async function POST(req: NextRequest) {
     sessionParams.customer_email = user.email ?? undefined;
   }
 
-  const session = await stripe.checkout.sessions.create(sessionParams);
-  return NextResponse.json({ url: session.url });
+  try {
+    const session = await stripe.checkout.sessions.create(sessionParams);
+    return NextResponse.json({ url: session.url });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to create checkout session' }, { status: 500 });
+  }
 }

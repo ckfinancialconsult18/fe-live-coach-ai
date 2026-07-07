@@ -664,7 +664,7 @@ function BillingTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planId: selectedPlan }),
       });
-      const d = await r.json() as { url?: string; error?: string };
+      const d = await r.json().catch(() => ({})) as { url?: string; error?: string };
       if (!r.ok || !d.url) throw new Error(d.error ?? 'Failed to start checkout');
       window.location.href = d.url;
     } catch (err) {
@@ -678,7 +678,7 @@ function BillingTab() {
     setError(null);
     try {
       const r = await fetch('/api/billing/portal', { method: 'POST' });
-      const d = await r.json() as { url?: string; error?: string };
+      const d = await r.json().catch(() => ({})) as { url?: string; error?: string };
       if (!r.ok || !d.url) throw new Error(d.error ?? 'Failed to open portal');
       window.location.href = d.url;
     } catch (err) {
