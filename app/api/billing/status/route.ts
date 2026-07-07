@@ -18,6 +18,25 @@ export async function GET() {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
 
+  // Check beta access first — bypasses Stripe entirely
+  const { data: userData } = await (supabase as any)
+    .from('users')
+    .select('beta_access')
+    .eq('id', user.id)
+    .single();
+
+  if (userData?.beta_access) {
+    return NextResponse.json({
+      status: 'trialing',
+      planName: 'professional',
+      trialEndsAt: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+      hasCustomer: false,
+    } satisfies BillingStatusResponse);
+  }
+
   const { data: sub } = await (supabase as any)
     .from('subscriptions')
     .select('status, plan_name, trial_ends_at, current_period_end, cancel_at_period_end, canceled_at, stripe_customer_id')
