@@ -8,10 +8,68 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { YoutubeTranscript } from 'youtube-transcript';
 import { getOpenAI } from '@/lib/openai';
 import { chunkText } from '@/lib/rag/chunk';
 import { embedTexts } from '@/lib/rag/embed';
+
+// ── YouTube caption fetch via Innertube API ──────────────────────────────────
+// Uses YouTube's internal API (same as the YouTube app) — avoids IP blocks
+// that plague web-scraper-based transcript libraries on shared hosting.
+
+async function fetchCaptionsViaInnertube(videoId: string): Promise<string> {
+  // Step 1: Get player response + caption track URLs
+  const playerRes = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+      'X-YouTube-Client-Name': '1',
+      'X-YouTube-Client-Version': '2.20231219.04.00',
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20231219.04.00',
+          hl: 'en',
+          gl: 'US',
+        },
+      },
+      videoId,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!playerRes.ok) throw new Error(`Innertube player API returned ${playerRes.status}`);
+  const player = await playerRes.json() as any;
+
+  const tracks: any[] = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+  if (!tracks.length) throw new Error('No captions available for this video');
+
+  // Prefer English auto-generated, then English manual, then first available
+  const track =
+    tracks.find((t) => t.languageCode === 'en' && t.kind === 'asr') ??
+    tracks.find((t) => t.languageCode === 'en') ??
+    tracks[0];
+
+  const captionUrl = track.baseUrl;
+
+  // Step 2: Fetch the caption XML
+  const xmlRes = await fetch(`${captionUrl}&fmt=json3`, { signal: AbortSignal.timeout(10000) });
+  if (!xmlRes.ok) throw new Error(`Caption fetch returned ${xmlRes.status}`);
+  const xml = await xmlRes.json() as any;
+
+  // Step 3: Flatten events to plain text
+  const text = (xml?.events ?? [])
+    .flatMap((e: any) => e.segs ?? [])
+    .map((s: any) => s.utf8 ?? '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) throw new Error('Caption text is empty');
+  return text;
+}
 
 export type PipelineStatus =
   | 'queued' | 'downloading' | 'extracting_audio'
@@ -92,8 +150,7 @@ export async function processVideoJob(
 
   let transcript: string;
   try {
-    const segments = await YoutubeTranscript.fetchTranscript(videoId);
-    transcript = segments.map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+    transcript = await fetchCaptionsViaInnertube(videoId);
   } catch (err) {
     throw new Error(`Could not fetch captions for this video. Make sure captions are enabled. (${err instanceof Error ? err.message : String(err)})`);
   }
