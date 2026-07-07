@@ -17,51 +17,27 @@ import { embedTexts } from '@/lib/rag/embed';
 // that plague web-scraper-based transcript libraries on shared hosting.
 
 async function fetchCaptionsViaInnertube(videoId: string): Promise<string> {
-  // Try multiple Innertube client contexts — TV embedded returns captions most reliably
-  const clients = [
-    {
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
-      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
-      thirdParty: 'https://www.youtube.com/',
+  // Fetch the YouTube watch page and extract ytInitialPlayerResponse —
+  // same data a browser gets, most reliable way to find caption track URLs.
+  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
-    {
-      clientName: 'WEB',
-      clientVersion: '2.20231219.04.00',
-      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
-      thirdParty: null,
-    },
-    {
-      clientName: 'ANDROID',
-      clientVersion: '19.09.37',
-      key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-      thirdParty: null,
-    },
-  ];
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!pageRes.ok) throw new Error(`YouTube page returned ${pageRes.status}`);
+  const html = await pageRes.text();
 
-  let tracks: any[] = [];
-  for (const c of clients) {
-    try {
-      const body: any = {
-        context: {
-          client: { clientName: c.clientName, clientVersion: c.clientVersion, hl: 'en', gl: 'US' },
-          ...(c.thirdParty ? { thirdParty: { embedUrl: c.thirdParty } } : {}),
-        },
-        videoId,
-      };
-      const playerRes = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${c.key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!playerRes.ok) continue;
-      const player = await playerRes.json() as any;
-      tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
-      if (tracks.length) break;
-    } catch { continue; }
-  }
+  // Extract ytInitialPlayerResponse JSON from the page
+  const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;/s);
+  if (!match) throw new Error('Could not find player data in YouTube page');
 
+  let player: any;
+  try { player = JSON.parse(match[1]); } catch { throw new Error('Failed to parse player data'); }
+
+  const tracks: any[] = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
   if (!tracks.length) throw new Error('No captions available for this video');
 
   // Prefer English auto-generated, then English manual, then first available
