@@ -17,33 +17,51 @@ import { embedTexts } from '@/lib/rag/embed';
 // that plague web-scraper-based transcript libraries on shared hosting.
 
 async function fetchCaptionsViaInnertube(videoId: string): Promise<string> {
-  // Step 1: Get player response + caption track URLs
-  const playerRes = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-      'X-YouTube-Client-Name': '1',
-      'X-YouTube-Client-Version': '2.20231219.04.00',
+  // Try multiple Innertube client contexts — TV embedded returns captions most reliably
+  const clients = [
+    {
+      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+      clientVersion: '2.0',
+      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+      thirdParty: 'https://www.youtube.com/',
     },
-    body: JSON.stringify({
-      context: {
-        client: {
-          clientName: 'WEB',
-          clientVersion: '2.20231219.04.00',
-          hl: 'en',
-          gl: 'US',
+    {
+      clientName: 'WEB',
+      clientVersion: '2.20231219.04.00',
+      key: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+      thirdParty: null,
+    },
+    {
+      clientName: 'ANDROID',
+      clientVersion: '19.09.37',
+      key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+      thirdParty: null,
+    },
+  ];
+
+  let tracks: any[] = [];
+  for (const c of clients) {
+    try {
+      const body: any = {
+        context: {
+          client: { clientName: c.clientName, clientVersion: c.clientVersion, hl: 'en', gl: 'US' },
+          ...(c.thirdParty ? { thirdParty: { embedUrl: c.thirdParty } } : {}),
         },
-      },
-      videoId,
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
+        videoId,
+      };
+      const playerRes = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${c.key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!playerRes.ok) continue;
+      const player = await playerRes.json() as any;
+      tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+      if (tracks.length) break;
+    } catch { continue; }
+  }
 
-  if (!playerRes.ok) throw new Error(`Innertube player API returned ${playerRes.status}`);
-  const player = await playerRes.json() as any;
-
-  const tracks: any[] = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
   if (!tracks.length) throw new Error('No captions available for this video');
 
   // Prefer English auto-generated, then English manual, then first available
