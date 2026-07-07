@@ -19,6 +19,7 @@ const navItems = [
   { href: '/contacts',       label: 'Contacts',       icon: UsersIcon },
   { href: '/reports',        label: 'Reports',        icon: ChartBarIcon },
   { href: '/analytics',      label: 'Analytics',      icon: TrendIcon },
+  { href: '/performance',    label: 'Performance',    icon: PerformanceIcon },
   { href: '/carrier-guide',  label: 'Carrier Guide',  icon: BuildingIcon },
   { href: '/learn-from-call',    label: 'Learn From Call',  icon: LearnIcon },
   { href: '/knowledge-center',   label: 'Knowledge Center', icon: KnowledgeCenterIcon },
@@ -247,6 +248,14 @@ function TrendIcon({ active = false }: { active?: boolean }) {
     <svg className={ic(active)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
       <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
       <polyline points="16 7 22 7 22 13"/>
+    </svg>
+  );
+}
+
+function PerformanceIcon({ active = false }: { active?: boolean }) {
+  return (
+    <svg className={ic(active)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 20V10M18 20V4M6 20v-4"/>
     </svg>
   );
 }
