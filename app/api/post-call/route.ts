@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
 import { createClient } from '@/lib/supabase/server';
+import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
 import { createRateLimiter, checkRateLimit } from '@/lib/rate-limit';
 import {
   SCORE_WEIGHTS,
@@ -350,12 +351,29 @@ export async function POST(req: NextRequest) {
   console.log('[post-call][4] OpenAI request — model:', model,
     '| transcriptChars:', body.transcript.length);
 
+  // RAG: retrieve knowledge relevant to this specific call's content
+  const transcriptExcerpt = body.transcript.slice(0, 600);
+  const [ragChunks, ragSources] = await (async () => {
+    try {
+      const chunks = await retrieveRelevantChunks(supabase, user.id, transcriptExcerpt, { matchCount: 5, minSimilarity: 0.38 });
+      const sources = await getChunkSources(supabase, chunks);
+      return [chunks, sources] as const;
+    } catch {
+      return [[] as import("@/lib/rag/retrieve").RetrievedChunk[], [] as import("@/lib/rag/retrieve").RagSource[]] as const;
+    }
+  })();
+
+  const ragContext = formatChunksForPrompt(ragChunks);
+  const ragSection = ragContext
+    ? `\n\nAGENT'S UPLOADED TRAINING MATERIAL (reference when explaining strengths, gaps, and recommendations — cite the source where relevant):\n${ragContext}\n`
+    : '';
+
   let report: any;
   try {
     const res = await openai.chat.completions.create({
       model,
       messages: [
-        { role: 'system', content: POST_CALL_PROMPT },
+        { role: 'system', content: POST_CALL_PROMPT + ragSection },
         {
           role: 'user',
           content: `Real computed metrics (use these exactly, do not recompute): talkPct=${realMetrics.talkPct}, listenPct=${realMetrics.listenPct}, questionsAskedCount=${realMetrics.questionsAskedCount}\n\nFull transcript:\n\n${body.transcript}`,
@@ -416,6 +434,8 @@ export async function POST(req: NextRequest) {
   console.log('[post-call][6] response sent — callId:', report.callId ?? 'none',
     '| _persistError:', report._persistError ?? 'none',
     '| _scoreError:', report._scoreError ?? 'none');
+
+  if (ragSources.length) report.ragSources = ragSources;
 
   return NextResponse.json(report);
 }

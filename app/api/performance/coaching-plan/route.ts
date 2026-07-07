@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getOpenAI } from '@/lib/openai';
+import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
 
 export interface CoachingPlan {
   generatedAt: string;
@@ -26,7 +27,12 @@ function buildPrompt(data: {
   topMissedOpportunities: string[];
   recurringImprovements: string[];
   stageScores: Record<string, number>;
+  ragContext?: string;
 }): string {
+  const knowledgeSection = data.ragContext
+    ? `\n\nAGENT'S UPLOADED KNOWLEDGE (use this to write specific, grounded scripts and recommendations — prefer this over generic advice):\n${data.ragContext}`
+    : '';
+
   return `You are an expert Final Expense insurance sales coach. Generate a personalized daily coaching plan for this agent based on their real call performance data.
 
 AGENT PERFORMANCE DATA (last ${data.callCount} calls):
@@ -36,7 +42,7 @@ AGENT PERFORMANCE DATA (last ${data.callCount} calls):
 - Stage scores: ${JSON.stringify(data.stageScores)}
 - Top objections received: ${data.topObjections.slice(0, 3).join(', ') || 'none recorded'}
 - Most missed opportunities: ${data.topMissedOpportunities.slice(0, 3).join(', ') || 'none recorded'}
-- Recurring AI coaching notes: ${data.recurringImprovements.slice(0, 3).join(', ') || 'none'}
+- Recurring AI coaching notes: ${data.recurringImprovements.slice(0, 3).join(', ') || 'none'}${knowledgeSection}
 
 Generate a JSON response with this exact structure:
 {
@@ -146,9 +152,29 @@ export async function GET(req: NextRequest) {
   });
   const recurringImprovements = [...improvMap.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).map(([k]) => k);
 
+  // RAG: retrieve uploaded knowledge most relevant to this agent's weak areas
+  const ragQuery = [
+    'final expense sales coaching',
+    weakestStage ?? '',
+    topObjections[0] ?? '',
+    topMissed[0] ?? '',
+  ].filter(Boolean).join(' ');
+
+  const [ragChunks, ragSources] = await (async () => {
+    try {
+      const chunks = await retrieveRelevantChunks(supabase, user.id, ragQuery, { matchCount: 5, minSimilarity: 0.38 });
+      const sources = await getChunkSources(supabase, chunks);
+      return [chunks, sources] as const;
+    } catch {
+      return [[] as import("@/lib/rag/retrieve").RetrievedChunk[], [] as import("@/lib/rag/retrieve").RagSource[]] as const;
+    }
+  })();
+
+  const ragContext = formatChunksForPrompt(ragChunks);
+
   // Generate with OpenAI
   const openai = getOpenAI();
-  const prompt = buildPrompt({ callCount: data.length, avgScore, strongestStage, weakestStage, topObjections, topMissedOpportunities: topMissed, recurringImprovements, stageScores });
+  const prompt = buildPrompt({ callCount: data.length, avgScore, strongestStage, weakestStage, topObjections, topMissedOpportunities: topMissed, recurringImprovements, stageScores, ragContext: ragContext || undefined });
 
   let plan: CoachingPlan;
   try {
@@ -165,13 +191,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Failed to generate coaching plan: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 });
   }
 
-  // Cache the result
+  // Cache the result (include ragSources so the UI can show attribution from cache too)
+  const planWithSources = { ...plan, ragSources };
   await db.from('coaching_cache').upsert({
     user_id: user.id,
     cache_date: today,
     window_days: days,
-    plan,
+    plan: planWithSources,
   }, { onConflict: 'user_id,cache_date,window_days' });
 
-  return NextResponse.json({ ...plan, fromCache: false });
+  return NextResponse.json({ ...planWithSources, fromCache: false });
 }

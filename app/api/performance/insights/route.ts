@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getOpenAI } from '@/lib/openai';
+import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
 
 export interface Insight {
   id: string;
@@ -110,6 +111,22 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // RAG: retrieve knowledge relevant to this agent's current patterns
+  const ragQuery = `final expense ${topObjections[0]?.split('(')[0].trim() ?? ''} ${topMissed[0]?.split('(')[0].trim() ?? ''} coaching improvement`.trim();
+  const [ragChunks, ragSources] = await (async () => {
+    try {
+      const chunks = await retrieveRelevantChunks(supabase, user.id, ragQuery, { matchCount: 4, minSimilarity: 0.38 });
+      const sources = await getChunkSources(supabase, chunks);
+      return [chunks, sources] as const;
+    } catch {
+      return [[] as import("@/lib/rag/retrieve").RetrievedChunk[], [] as import("@/lib/rag/retrieve").RagSource[]] as const;
+    }
+  })();
+  const ragContext = formatChunksForPrompt(ragChunks);
+  const ragSection = ragContext
+    ? `\n\nAGENT'S UPLOADED KNOWLEDGE (reference specific passages to make insights actionable — name the source when you do):\n${ragContext}\n`
+    : '';
+
   const prompt = `You are a Final Expense sales performance analyst. Based on ONLY the following real call data, generate 4-6 specific, insightful observations about this agent's patterns.
 
 REAL DATA (${current.length} calls over ${days} days):
@@ -118,7 +135,7 @@ REAL DATA (${current.length} calls over ${days} days):
 - Previous stage scores: ${JSON.stringify(prevStageAvgs)}
 - Stage improvement trends (positive = improving): ${JSON.stringify(stagetrends)}
 - Top objections received: ${topObjections.join(', ') || 'none'}
-- Most missed opportunities: ${topMissed.join(', ') || 'none'}
+- Most missed opportunities: ${topMissed.join(', ') || 'none'}${ragSection}
 
 Rules:
 - ONLY reference patterns visible in the data above
@@ -156,5 +173,5 @@ Return JSON:
     return NextResponse.json({ error: `Failed to generate insights: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 });
   }
 
-  return NextResponse.json({ insights, callCount: current.length, window: days });
+  return NextResponse.json({ insights, callCount: current.length, window: days, ragSources });
 }

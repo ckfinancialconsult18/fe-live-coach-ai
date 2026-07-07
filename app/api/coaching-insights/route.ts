@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { COACHING_RECOMMENDATIONS_PROMPT } from '@/lib/coach-prompts';
 import { requireUser } from '@/lib/api/guard';
+import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
 
 const MIN_SCORED_CALLS = 3;
 
@@ -89,11 +90,31 @@ export async function GET() {
     return NextResponse.json({ insufficientData: false, stats, recommendations: [], aiUnavailable: true });
   }
 
+  // RAG: retrieve knowledge relevant to the agent's weak areas and top objections
+  const topObjList = stats.topObjections.slice(0, 2).map(([o]: [string, number]) => o).join(' ');
+  const weakStage = Object.entries(stats.stageAverages).sort((a, b) => (a[1] as number) - (b[1] as number))[0]?.[0] ?? '';
+  const ragQuery = `final expense sales coaching ${weakStage} ${topObjList}`.trim();
+
+  const [ragChunks, ragSources] = await (async () => {
+    try {
+      const chunks = await retrieveRelevantChunks(supabase, user.id, ragQuery, { matchCount: 4, minSimilarity: 0.38 });
+      const sources = await getChunkSources(supabase, chunks);
+      return [chunks, sources] as const;
+    } catch {
+      return [[] as import("@/lib/rag/retrieve").RetrievedChunk[], [] as import("@/lib/rag/retrieve").RagSource[]] as const;
+    }
+  })();
+
+  const ragContext = formatChunksForPrompt(ragChunks);
+  const ragMessage = ragContext
+    ? `\n\nAGENT'S UPLOADED KNOWLEDGE (use this to make recommendations specific and grounded — cite the source by name when referencing it):\n${ragContext}`
+    : '';
+
   try {
     const res = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: COACHING_RECOMMENDATIONS_PROMPT },
+        { role: 'system', content: COACHING_RECOMMENDATIONS_PROMPT + ragMessage },
         { role: 'user', content: JSON.stringify(stats) },
       ],
       temperature: 0.4,
@@ -111,7 +132,7 @@ export async function GET() {
       recommendations,
     } as any);
 
-    return NextResponse.json({ insufficientData: false, stats, recommendations });
+    return NextResponse.json({ insufficientData: false, stats, recommendations, ragSources });
   } catch (err) {
     console.error('Coaching insights generation failed:', err);
     return NextResponse.json({ insufficientData: false, stats, recommendations: [], aiUnavailable: true });

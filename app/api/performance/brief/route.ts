@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getOpenAI } from '@/lib/openai';
+import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
 
 const STAGE_KEYS = [
   { key: 'introduction',     label: 'Opening / Intro' },
@@ -85,6 +86,22 @@ async function generateCoachSummary(
 
   if (briefData.callCount < 2) return null;
 
+  // RAG: retrieve knowledge relevant to the agent's weakest area and top objection
+  const ragQuery = [
+    'final expense sales coaching',
+    briefData.weakestSkill?.label ?? '',
+    briefData.topObjection ?? '',
+  ].filter(Boolean).join(' ');
+
+  let ragSection = '';
+  try {
+    const chunks = await retrieveRelevantChunks(db, userId, ragQuery, { matchCount: 3, minSimilarity: 0.40 });
+    const formatted = formatChunksForPrompt(chunks);
+    if (formatted) {
+      ragSection = `\n\nRELEVANT MATERIAL FROM AGENT'S UPLOADED KNOWLEDGE:\n${formatted}\n\nReference this material when giving today's specific focus.`;
+    }
+  } catch { /* RAG is non-blocking */ }
+
   const trendWord =
     briefData.trendDirection === 'up' ? 'improving' :
     briefData.trendDirection === 'down' ? 'declining' : 'holding steady';
@@ -107,7 +124,7 @@ Rules:
 - Write in second person ("you", "your")
 - No generic phrases like "keep up the great work" — be specific
 - 2-3 sentences maximum
-
+${ragSection}
 Return plain text only, no JSON.`;
 
   try {
