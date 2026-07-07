@@ -84,6 +84,8 @@ interface ProfilePatchBody {
   agencyAddress?: string;
   agencyCity?: string;
   agencyState?: string;
+  avatarUrl?: string | null;
+  agencyLogoUrl?: string | null;
   notificationPreferences?: Record<string, boolean>;
   aiPreferences?: Record<string, unknown>;
   coachingPreferences?: Record<string, unknown>;
