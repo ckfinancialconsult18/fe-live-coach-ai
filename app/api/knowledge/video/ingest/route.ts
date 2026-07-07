@@ -2,7 +2,6 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
-import { createClient } from '@supabase/supabase-js';
 import {
   extractYouTubeId,
   isPlaylist,
@@ -74,16 +73,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Process inline — caption fetch + GPT + embed takes ~5-10s, well within limits.
-  // Service-role client so processVideoJob can write without RLS restrictions.
-  const serviceSupabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  ) as any;
-
+  // Use the authenticated user client (RLS covers all reads/writes for own rows).
   try {
-    await processVideoJob(serviceSupabase, job.id, user.id, async (status, progress) => {
-      await serviceSupabase.from('video_knowledge').update({
+    await processVideoJob(db, job.id, user.id, async (status, progress) => {
+      await db.from('video_knowledge').update({
         status,
         progress,
         ...(status === 'complete' ? { completed_at: new Date().toISOString() } : {}),
@@ -91,7 +84,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await serviceSupabase.from('video_knowledge').update({ status: 'error', error_message: message }).eq('id', job.id);
+    await db.from('video_knowledge').update({ status: 'error', error_message: message }).eq('id', job.id);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
