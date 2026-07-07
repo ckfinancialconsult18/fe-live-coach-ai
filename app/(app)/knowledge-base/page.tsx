@@ -5,6 +5,25 @@ import VideoBuilder from '@/components/knowledge/VideoBuilder';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface DocStat {
+  documentId: string | null;
+  title: string;
+  sourceType: string;
+  retrievalCount: number;
+  positiveOutcomeCount: number;
+  weight: number;
+  winRate: number | null;
+  lastRetrievedAt: string | null;
+}
+
+interface AnalyticsSummary {
+  totalDocs: number;
+  everRetrieved: number;
+  neverUsed: number;
+  topSources: DocStat[];
+  underperforming: DocStat[];
+}
+
 interface KnowledgeDoc {
   id: string;
   title: string;
@@ -326,7 +345,14 @@ function UploadModal({ onClose, onUploaded }: { onClose: () => void; onUploaded:
 
 // ─── Document Card ─────────────────────────────────────────────────────────────
 
-function DocCard({ doc, onRefresh }: { doc: KnowledgeDoc; onRefresh: () => void }) {
+function weightLabel(w: number): { icon: string; label: string; color: string } | null {
+  if (w >= 1.6) return { icon: '🔥', label: 'Top source', color: '#f59e0b' };
+  if (w >= 1.2) return { icon: '⭐', label: 'High impact', color: '#22c55e' };
+  if (w < 0.75) return { icon: '↓', label: 'Low impact', color: '#64748b' };
+  return null;
+}
+
+function DocCard({ doc, stats, onRefresh }: { doc: KnowledgeDoc; stats?: DocStat; onRefresh: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(doc.title);
@@ -375,6 +401,7 @@ function DocCard({ doc, onRefresh }: { doc: KnowledgeDoc; onRefresh: () => void 
   const color = SOURCE_COLORS[doc.sourceType] ?? '#64748b';
   const statusColor = doc.status === 'ready' ? '#22c55e' : doc.status === 'failed' ? '#ef4444' : '#f59e0b';
   const statusLabel = doc.status === 'ready' ? 'Ready' : doc.status === 'failed' ? 'Failed' : 'Processing';
+  const wBadge = stats ? weightLabel(stats.weight) : null;
 
   return (
     <div className={`glass-card rounded-2xl overflow-hidden transition-opacity ${doc.archived ? 'opacity-50' : ''}`}>
@@ -405,6 +432,18 @@ function DocCard({ doc, onRefresh }: { doc: KnowledgeDoc; onRefresh: () => void 
             )}
             {doc.archived && (
               <span className="text-[10px] font-semibold text-slate-600">Archived</span>
+            )}
+            {wBadge && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ color: wBadge.color, background: `${wBadge.color}18` }}
+                title={`Weight: ${stats?.weight.toFixed(2)} | Retrieved ${stats?.retrievalCount}× | Win rate: ${stats?.winRate != null ? stats.winRate + '%' : 'n/a'}`}>
+                {wBadge.icon} {wBadge.label}
+              </span>
+            )}
+            {stats && stats.retrievalCount > 0 && !wBadge && (
+              <span className="text-[10px] text-slate-600" title={`Used ${stats.retrievalCount}× in coaching`}>
+                {stats.retrievalCount}× used
+              </span>
             )}
           </div>
 
@@ -476,6 +515,7 @@ function DocCard({ doc, onRefresh }: { doc: KnowledgeDoc; onRefresh: () => void 
 
 function LibraryTab() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
+  const [statsMap, setStatsMap] = useState<Map<string, DocStat>>(new Map());
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [filter, setFilter] = useState('all');
@@ -484,10 +524,19 @@ function LibraryTab() {
 
   const fetchDocs = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/knowledge/documents');
-    if (res.ok) {
-      const j = await res.json();
+    const [docsRes, statsRes] = await Promise.all([
+      fetch('/api/knowledge/documents'),
+      fetch('/api/knowledge/analytics'),
+    ]);
+    if (docsRes.ok) {
+      const j = await docsRes.json();
       setDocs(j.documents ?? []);
+    }
+    if (statsRes.ok) {
+      const j = await statsRes.json();
+      const map = new Map<string, DocStat>();
+      (j.docs ?? []).forEach((s: DocStat) => { if (s.documentId) map.set(s.documentId, s); });
+      setStatsMap(map);
     }
     setLoading(false);
   }, []);
@@ -565,7 +614,7 @@ function LibraryTab() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map((d) => <DocCard key={d.id} doc={d} onRefresh={fetchDocs} />)}
+          {filtered.map((d) => <DocCard key={d.id} doc={d} stats={statsMap.get(d.id)} onRefresh={fetchDocs} />)}
         </div>
       )}
     </>
@@ -654,7 +703,116 @@ function SearchTab() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'library' | 'scripts' | 'videos' | 'search';
+// ─── Analytics Tab ────────────────────────────────────────────────────────────
+
+function AnalyticsTab() {
+  const [data, setData] = useState<{ docs: DocStat[]; summary: AnalyticsSummary } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/knowledge/analytics')
+      .then((r) => r.json())
+      .then((j) => setData(j))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="flex items-center justify-center py-20 text-slate-600 text-sm">Loading analytics…</div>;
+  if (!data) return <div className="text-slate-500 text-sm py-12 text-center">Analytics unavailable.</div>;
+
+  const { docs, summary } = data;
+  const everUsed = docs.filter((d) => d.retrievalCount > 0).sort((a, b) => b.weight - a.weight);
+  const unused = docs.filter((d) => d.retrievalCount === 0);
+
+  return (
+    <div className="space-y-6">
+      {/* KPI row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total documents', value: summary.totalDocs },
+          { label: 'Used in coaching', value: summary.everRetrieved },
+          { label: 'Never used', value: summary.neverUsed },
+          { label: 'Top sources', value: summary.topSources.length },
+        ].map((k) => (
+          <div key={k.label} className="glass-card rounded-2xl p-4 text-center">
+            <p className="text-2xl font-bold text-slate-100">{k.value}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">{k.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Active sources */}
+      {everUsed.length > 0 && (
+        <div className="glass-card rounded-2xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-white/6 flex items-center gap-2">
+            <span className="text-sm font-bold text-slate-200">Knowledge Sources by Impact</span>
+            <span className="text-[10px] text-slate-600 ml-auto">sorted by coaching weight</span>
+          </div>
+          <div className="divide-y divide-white/4">
+            {everUsed.map((d) => {
+              const wb = weightLabel(d.weight);
+              return (
+                <div key={d.documentId ?? d.title} className="flex items-center gap-3 px-5 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-200 truncate">{d.title}</p>
+                    <p className="text-[10px] text-slate-500">{SOURCE_LABELS[d.sourceType] ?? d.sourceType}</p>
+                  </div>
+                  <div className="text-right shrink-0 space-y-0.5">
+                    <p className="text-xs font-semibold text-slate-300">{d.retrievalCount}× retrieved</p>
+                    {d.winRate != null && (
+                      <p className="text-[10px] text-slate-500">{d.winRate}% win rate</p>
+                    )}
+                  </div>
+                  {/* Weight bar */}
+                  <div className="w-20 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex-1 h-1.5 bg-white/8 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, ((d.weight - 0.5) / 1.5) * 100)}%`,
+                            background: wb ? wb.color : '#64748b',
+                          }} />
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500 w-7 text-right">{d.weight.toFixed(1)}×</span>
+                    </div>
+                    {wb && <p className="text-[9px] mt-0.5" style={{ color: wb.color }}>{wb.icon} {wb.label}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Unused documents */}
+      {unused.length > 0 && (
+        <div className="glass-card rounded-2xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-white/6">
+            <span className="text-sm font-bold text-slate-200">Never Retrieved</span>
+            <span className="text-[10px] text-slate-500 ml-2">these documents haven't matched any coaching query yet</span>
+          </div>
+          <div className="divide-y divide-white/4">
+            {unused.map((d) => (
+              <div key={d.documentId ?? d.title} className="flex items-center gap-3 px-5 py-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-700 shrink-0" />
+                <p className="text-sm text-slate-400 flex-1 truncate">{d.title}</p>
+                <span className="text-[10px] text-slate-600">{SOURCE_LABELS[d.sourceType] ?? d.sourceType}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {docs.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-slate-600 text-sm gap-2">
+          <p>No analytics yet — start a live call to see which documents the AI uses.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type Tab = 'library' | 'analytics' | 'scripts' | 'videos' | 'search';
 
 export default function KnowledgeBasePage() {
   const [tab, setTab] = useState<Tab>('library');
@@ -664,6 +822,11 @@ export default function KnowledgeBasePage() {
       id: 'library',
       label: 'Document Library',
       icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
     },
     {
       id: 'search',
@@ -706,6 +869,8 @@ export default function KnowledgeBasePage() {
           <LibraryTab />
         </div>
       )}
+
+      {tab === 'analytics' && <AnalyticsTab />}
 
       {tab === 'search' && <SearchTab />}
 
