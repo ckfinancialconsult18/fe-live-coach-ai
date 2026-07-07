@@ -68,7 +68,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/6">
         <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 shadow-lg flex items-center justify-center"
           style={{ boxShadow: '0 4px 16px rgba(212,175,55,0.35)' }}>
-          <Image src="/logo.png" alt="FE Live Coach AI" width={36} height={36} className="object-cover w-full h-full" />
+          <Image src="/logo.webp" alt="FE Live Coach AI" width={36} height={36} className="object-cover w-full h-full" />
         </div>
         {!collapsed && (
           <div className="min-w-0">
