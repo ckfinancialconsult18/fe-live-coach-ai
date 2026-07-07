@@ -42,6 +42,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# yt-dlp (YouTube downloader) and ffmpeg (audio extraction) for video pipeline
+RUN apk add --no-cache ffmpeg python3 py3-pip \
+ && pip3 install --break-system-packages yt-dlp
+
 RUN addgroup --system --gid 1001 nodejs \
  && adduser  --system --uid 1001 nextjs
 
