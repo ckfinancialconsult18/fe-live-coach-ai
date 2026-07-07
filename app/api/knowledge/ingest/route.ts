@@ -34,10 +34,13 @@ export async function POST(request: NextRequest) {
     const carrierId = formData.get('carrierId') ? String(formData.get('carrierId')) : null;
     const tags = String(formData.get('tags') ?? '').split(',').map((t) => t.trim()).filter(Boolean);
 
+    const isImage = /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+    // Store images as octet-stream to avoid bucket MIME allowlist restrictions
+    const storageMime = isImage ? 'application/octet-stream' : file.type;
     const storagePath = `${user.id}/${crypto.randomUUID()}-${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('knowledge')
-      .upload(storagePath, file, { contentType: file.type, upsert: false });
+      .upload(storagePath, file, { contentType: storageMime, upsert: false });
     if (uploadError) {
       await logPipelineEvent(supabase, { userId: user.id, eventType: 'upload_failure', message: uploadError.message, metadata: { fileName: file.name } });
       return NextResponse.json({ error: uploadError.message }, { status: 500 });
