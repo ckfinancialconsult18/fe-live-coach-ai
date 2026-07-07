@@ -7,17 +7,11 @@
  * 5. Chunk + embed → knowledge_documents + embedding_queue
  */
 
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { YoutubeTranscript } from 'youtube-transcript';
 import { getOpenAI } from '@/lib/openai';
 import { chunkText } from '@/lib/rag/chunk';
 import { embedTexts } from '@/lib/rag/embed';
-
-const execAsync = promisify(exec);
 
 export type PipelineStatus =
   | 'queued' | 'downloading' | 'extracting_audio'
@@ -67,11 +61,9 @@ export async function fetchYouTubeMetadata(url: string): Promise<{
 }
 
 export async function fetchPlaylistUrls(playlistUrl: string): Promise<string[]> {
-  const { stdout } = await execAsync(
-    `yt-dlp --flat-playlist --print "%(url)s" "${playlistUrl}"`,
-    { timeout: 60000 }
-  );
-  return stdout.trim().split('\n').filter(Boolean).map((u) => u.trim());
+  // Extract playlist ID and use YouTube's oEmbed + playlist RSS as a lightweight alternative.
+  // For now return an error — playlist support requires yt-dlp which is bot-detected on Railway.
+  throw new Error('Playlist import is not supported. Please add videos one at a time using their individual URLs.');
 }
 
 // ── Main pipeline ────────────────────────────────────────────────────────────
@@ -82,163 +74,95 @@ export async function processVideoJob(
   userId: string,
   onProgress: ProgressCallback
 ): Promise<void> {
-  const tmpDir = await mkdtemp(join(tmpdir(), 'video-'));
+  // Load job
+  const { data: job } = await supabase
+    .from('video_knowledge')
+    .select('*')
+    .eq('id', jobId)
+    .single();
 
+  if (!job) throw new Error('Job not found');
+
+  // ── Step 1: Fetch transcript from YouTube captions ───────────────────────
+  // No yt-dlp, no audio download, no Deepgram — completes in seconds.
+  await onProgress('transcribing', 20);
+
+  const videoId = job.youtube_id ?? extractYouTubeId(job.youtube_url ?? '');
+  if (!videoId) throw new Error('Cannot determine YouTube video ID');
+
+  let transcript: string;
   try {
-    // Load job
-    const { data: job } = await supabase
-      .from('video_knowledge')
-      .select('*')
-      .eq('id', jobId)
-      .single();
-
-    if (!job) throw new Error('Job not found');
-
-    // ── Step 1: Download ──────────────────────────────────────────────────
-    await onProgress('downloading', 10);
-
-    const audioPath = join(tmpDir, 'audio.%(ext)s');
-    let wavPath = join(tmpDir, 'audio.wav');
-
-    if (job.source_type === 'youtube') {
-      await execAsync(
-        `yt-dlp -x --audio-format wav --audio-quality 0 -o "${audioPath}" "${job.youtube_url}"`,
-        { timeout: 300000 }
-      );
-      // yt-dlp may name it differently; find it
-      const { stdout } = await execAsync(`ls "${tmpDir}"`);
-      const audioFile = stdout.trim().split('\n').find((f) => f.endsWith('.wav') || f.endsWith('.webm') || f.endsWith('.m4a') || f.endsWith('.mp3'));
-      if (!audioFile) throw new Error('yt-dlp did not produce an audio file');
-      wavPath = join(tmpDir, audioFile);
-    } else if (job.storage_path) {
-      // Download from Supabase Storage
-      const { data: fileData } = await supabase.storage
-        .from('video-uploads')
-        .download(job.storage_path);
-      if (!fileData) throw new Error('Failed to download uploaded file');
-      const uploadedPath = join(tmpDir, 'uploaded');
-      await writeFile(uploadedPath, Buffer.from(await fileData.arrayBuffer()));
-      wavPath = uploadedPath;
-    }
-
-    // ── Step 2: Convert to WAV if needed ─────────────────────────────────
-    await onProgress('extracting_audio', 25);
-
-    if (!wavPath.endsWith('.wav')) {
-      const convertedPath = join(tmpDir, 'audio.wav');
-      await execAsync(
-        `ffmpeg -i "${wavPath}" -ar 16000 -ac 1 -f wav "${convertedPath}" -y`,
-        { timeout: 120000 }
-      );
-      wavPath = convertedPath;
-    }
-
-    // ── Step 3: Transcribe with Deepgram REST API ─────────────────────────
-    await onProgress('transcribing', 40);
-
-    const deepgramKey = process.env.DEEPGRAM_API_KEY;
-    if (!deepgramKey) throw new Error('DEEPGRAM_API_KEY not configured');
-
-    const audioBuffer = await readFile(wavPath);
-
-    const dgRes = await fetch(
-      'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&diarize=true&punctuate=true&paragraphs=true&utterances=true&language=en',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${deepgramKey}`,
-          'Content-Type': 'audio/wav',
-        },
-        body: audioBuffer,
-      }
-    );
-
-    if (!dgRes.ok) {
-      const errText = await dgRes.text().catch(() => '');
-      throw new Error(`Deepgram API error ${dgRes.status}: ${errText}`);
-    }
-
-    const dgJson = await dgRes.json() as { results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> } };
-    const transcript = dgJson?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
-    if (!transcript) throw new Error('Deepgram returned empty transcript');
-
-    // Save raw transcript
-    await supabase.from('video_knowledge').update({ transcript_text: transcript }).eq('id', jobId);
-
-    // ── Step 4: Extract knowledge with OpenAI ────────────────────────────
-    await onProgress('building_knowledge', 60);
-
-    const openai = getOpenAI();
-    const extractionPrompt = buildVideoExtractionPrompt(transcript, job.title ?? 'Video');
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: extractionPrompt }],
-      response_format: { type: 'json_object' },
-      max_tokens: 2000,
-    });
-
-    let extracted: { summary?: string; takeaways?: string[]; tags?: string[] } = {};
-    try {
-      extracted = JSON.parse(completion.choices[0]?.message?.content ?? '{}');
-    } catch { /* use empty */ }
-
-    // ── Step 5: Create knowledge document + chunk + embed ─────────────────
-    await onProgress('embedding', 75);
-
-    // Insert into knowledge_documents so it's searchable via existing RAG
-    const { data: doc } = await supabase.from('knowledge_documents').insert({
-      user_id: userId,
-      title: job.title ?? 'Video Knowledge',
-      source_type: 'training',
-      raw_text: transcript,
-      status: 'processing',
-    }).select('id').single();
-
-    if (doc) {
-      // Update video job with document link and AI outputs
-      await supabase.from('video_knowledge').update({
-        document_id: doc.id,
-        ai_summary: extracted.summary ?? null,
-        key_takeaways: extracted.takeaways ?? [],
-        tags: extracted.tags ?? [],
-      }).eq('id', jobId);
-
-      // Chunk and embed
-      const chunks = chunkText(transcript);
-      const embeddings = await embedTexts(chunks);
-
-      const queueRows = chunks.map((chunk, i) => ({
-        user_id: userId,
-        document_id: doc.id,
-        chunk_index: i,
-        chunk_text: chunk,
-        embedding: JSON.stringify(embeddings[i]),
-        metadata: {
-          video_id: jobId,
-          youtube_url: job.youtube_url,
-          title: job.title,
-          channel: job.channel_name,
-          category: job.category,
-          tags: extracted.tags ?? [],
-        },
-        status: 'ready',
-      }));
-
-      // Insert in batches of 50
-      for (let i = 0; i < queueRows.length; i += 50) {
-        await supabase.from('knowledge_chunks').insert(queueRows.slice(i, i + 50));
-      }
-
-      // Mark document ready
-      await supabase.from('knowledge_documents').update({ status: 'ready' }).eq('id', doc.id);
-    }
-
-    await onProgress('complete', 100);
-
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true });
+    const segments = await YoutubeTranscript.fetchTranscript(videoId);
+    transcript = segments.map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+  } catch (err) {
+    throw new Error(`Could not fetch captions for this video. Make sure captions are enabled. (${err instanceof Error ? err.message : String(err)})`);
   }
+
+  if (!transcript) throw new Error('Transcript is empty — video may have no captions');
+
+  await supabase.from('video_knowledge').update({ transcript_text: transcript }).eq('id', jobId);
+
+  // ── Step 2: Extract knowledge with OpenAI ──────────────────────────────
+  await onProgress('building_knowledge', 50);
+
+  const openai = getOpenAI();
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: buildVideoExtractionPrompt(transcript, job.title ?? 'Video') }],
+    response_format: { type: 'json_object' },
+    max_tokens: 2000,
+  });
+
+  let extracted: { summary?: string; takeaways?: string[]; tags?: string[] } = {};
+  try { extracted = JSON.parse(completion.choices[0]?.message?.content ?? '{}'); } catch { /* use empty */ }
+
+  // ── Step 3: Create knowledge document + chunk + embed ─────────────────
+  await onProgress('embedding', 70);
+
+  const { data: doc } = await supabase.from('knowledge_documents').insert({
+    user_id: userId,
+    title: job.title ?? 'Video Knowledge',
+    source_type: 'training',
+    raw_text: transcript,
+    status: 'processing',
+  }).select('id').single();
+
+  if (doc) {
+    await supabase.from('video_knowledge').update({
+      document_id: doc.id,
+      ai_summary: extracted.summary ?? null,
+      key_takeaways: extracted.takeaways ?? [],
+      tags: extracted.tags ?? [],
+    }).eq('id', jobId);
+
+    const chunks = chunkText(transcript);
+    const embeddings = await embedTexts(chunks);
+
+    const queueRows = chunks.map((chunk, i) => ({
+      user_id: userId,
+      document_id: doc.id,
+      chunk_index: i,
+      chunk_text: chunk,
+      embedding: JSON.stringify(embeddings[i]),
+      metadata: {
+        video_id: jobId,
+        youtube_url: job.youtube_url,
+        title: job.title,
+        channel: job.channel_name,
+        category: job.category,
+        tags: extracted.tags ?? [],
+      },
+      status: 'ready',
+    }));
+
+    for (let i = 0; i < queueRows.length; i += 50) {
+      await supabase.from('knowledge_chunks').insert(queueRows.slice(i, i + 50));
+    }
+
+    await supabase.from('knowledge_documents').update({ status: 'ready' }).eq('id', doc.id);
+  }
+
+  await onProgress('complete', 100);
 }
 
 function buildVideoExtractionPrompt(transcript: string, title: string): string {

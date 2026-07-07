@@ -7,6 +7,14 @@ import {
   fetchPlaylistUrls,
 } from '@/lib/video/pipeline';
 
+function processBaseUrl(): string {
+  // NEXT_PUBLIC_APP_URL takes precedence (set in Railway dashboard)
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  // Railway auto-sets RAILWAY_PUBLIC_DOMAIN (no protocol)
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  return 'http://localhost:3000';
+}
+
 export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
@@ -61,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     // Kick off processing for each job (fire-and-forget)
     for (const job of jobs) {
-      fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? ''}/api/knowledge/video/process`, {
+      fetch(`${processBaseUrl()}/api/knowledge/video/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId: job.id }),
@@ -115,7 +123,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Kick off processing (fire-and-forget)
-  fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? ''}/api/knowledge/video/process`, {
+  fetch(`${processBaseUrl()}/api/knowledge/video/process`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jobId: job.id }),
