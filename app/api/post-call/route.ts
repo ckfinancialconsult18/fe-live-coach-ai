@@ -14,6 +14,20 @@ import {
   type ConversationAnalysis,
 } from '@/lib/types';
 
+function normalizeScore(raw: number): number {
+  if (raw > 0 && raw <= 1)  return Math.round(raw * 100);
+  if (raw > 1 && raw <= 10) return Math.round(raw * 10);
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
+function normalizeScoreMap(map: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(map)) {
+    if (typeof v === 'number') out[k] = normalizeScore(v);
+  }
+  return out;
+}
+
 function computeWeightedScore(
   categoryScores: Record<string, number>,
   categoryExplanations: Record<string, string>,
@@ -25,11 +39,7 @@ function computeWeightedScore(
   let totalWeighted = 0;
 
   for (const [key, weight] of Object.entries(SCORE_WEIGHTS)) {
-    let raw = categoryScores[key] ?? 50;
-    // Normalize: if the AI returned a 0-1 decimal or 0-10 scale, scale up to 0-100
-    if (raw > 0 && raw <= 1)   raw = raw * 100;
-    else if (raw > 1 && raw <= 10) raw = raw * 10;
-    const score = Math.max(0, Math.min(100, Math.round(raw)));
+    const score = normalizeScore(categoryScores[key] ?? 50);
     const contribution = score * weight;
     totalWeighted += contribution;
     categories.push({
@@ -218,8 +228,8 @@ async function persistScore(
     user_id: userId,
     call_id: callId,
     overall_score: report.overallScore ?? 0,
-    scores: report.scores ?? {},
-    quality_scores: report.qualityScores ?? {},
+    scores: normalizeScoreMap(report.scores ?? {}),
+    quality_scores: normalizeScoreMap(report.qualityScores ?? {}),
     timeline: body.timeline ?? [],
     report_details: {
       rapportScore: report.rapportScore ?? 0,

@@ -42,12 +42,10 @@ export async function GET() {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const { data: todayCalls } = await db
-    .from('calls')
-    .select('id, outcome')
-    .eq('user_id', user.id)
-    .eq('status', 'completed')
-    .gte('started_at', today.toISOString());
+  const [{ data: todayCalls }, { data: todayAppts }] = await Promise.all([
+    db.from('calls').select('id, outcome').eq('user_id', user.id).eq('status', 'completed').gte('started_at', today.toISOString()),
+    db.from('appointments').select('id').eq('user_id', user.id).gte('start_time', today.toISOString()).lte('start_time', new Date(today.getTime() + 86400000).toISOString()),
+  ]);
 
   const { data: thirtyDayScores } = await db
     .from('call_scores')
@@ -64,6 +62,7 @@ export async function GET() {
 
   const todayCallCount = (todayCalls ?? []).length;
   const todayPolicies = (todayCalls ?? []).filter((c: { outcome: string }) => c.outcome === 'policy_written').length;
+  const todayAppointments = (todayAppts ?? []).length;
 
   // Close rate over 30 days
   const totalCalls30 = (thirtyDayCalls ?? []).length;
@@ -75,9 +74,6 @@ export async function GET() {
   const avgScore30 = scoreRows.length
     ? Math.round(scoreRows.reduce((a: number, r: { overall_score: number }) => a + r.overall_score, 0) / scoreRows.length)
     : 0;
-
-  // Appointments today (from calls with specific outcome or contact bookings — use calls as proxy)
-  const todayAppointments = 0; // No appointments table link to today's calls yet; show 0 honestly
 
   const actuals: Record<GoalType, number> = {
     calls_per_day: todayCallCount,
