@@ -207,18 +207,81 @@ async function patchMe(body: Record<string, unknown>) {
 
 // ── Profile Tab ───────────────────────────────────────────────────────────────
 
+function AvatarUpload({ currentUrl, label, bucket, pathPrefix, onUploaded }: {
+  currentUrl: string | null;
+  label: string;
+  bucket: string;
+  pathPrefix: string;
+  onUploaded: (url: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string | null>(currentUrl);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { setPreview(currentUrl); }, [currentUrl]);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setError('Max 5 MB'); return; }
+    setError(null);
+    setUploading(true);
+    try {
+      const res = await fetch(`/api/upload/avatar?bucket=${bucket}&path=${pathPrefix}/${file.name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? 'Upload failed');
+      setPreview(d.url);
+      onUploaded(d.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="relative group w-24 h-24 rounded-2xl overflow-hidden border-2 border-white/10 hover:border-[#D4AF37]/50 transition-colors"
+        style={{ background: preview ? 'transparent' : 'linear-gradient(135deg,#1e293b,#0f172a)' }}
+      >
+        {preview
+          ? <img src={preview} alt={label} className="w-full h-full object-cover" />
+          : <span className="text-3xl text-slate-500">+</span>
+        }
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <span className="text-xs text-white font-semibold">{uploading ? 'Uploading…' : 'Change'}</span>
+        </div>
+      </button>
+      <p className="text-[11px] text-slate-500">{label}</p>
+      {error && <p className="text-[11px] text-red-400">{error}</p>}
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
 function ProfileTab() {
   const [form, setForm] = useState<ProfileForm>({
     firstName: '', lastName: '', phone: '', licenseNumber: '', defaultState: '', bio: '',
   });
   const [email, setEmail] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [agencyLogoUrl, setAgencyLogoUrl] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const { state, errorMsg, save } = useSaveState();
 
   useEffect(() => {
     fetch('/api/me')
       .then((r) => r.json())
-      .then((d: { user?: { fullName?: string; email?: string; phone?: string; licenseNumber?: string; defaultState?: string; bio?: string } }) => {
+      .then((d: { user?: { id?: string; fullName?: string; email?: string; phone?: string; licenseNumber?: string; defaultState?: string; bio?: string; avatarUrl?: string; agencyLogoUrl?: string } }) => {
         const u = d.user ?? {};
         const parts = (u.fullName ?? '').trim().split(' ');
         setForm({
@@ -230,6 +293,9 @@ function ProfileTab() {
           bio:           u.bio ?? '',
         });
         setEmail(u.email ?? '');
+        setUserId(u.id ?? '');
+        setAvatarUrl(u.avatarUrl ?? null);
+        setAgencyLogoUrl(u.agencyLogoUrl ?? null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -248,24 +314,43 @@ function ProfileTab() {
         licenseNumber: form.licenseNumber,
         defaultState:  form.defaultState,
         bio:           form.bio,
+        avatarUrl,
+        agencyLogoUrl,
       });
     });
   }
 
   if (loading) return <LoadingSkeleton />;
 
+  const displayName = `${form.firstName} ${form.lastName}`.trim() || 'Your Profile';
+
   return (
     <div className="glass-card rounded-2xl p-6 space-y-6">
       <h2 className="text-lg font-semibold text-slate-100">Profile Settings</h2>
-      <div className="flex items-center gap-5">
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-2xl font-bold text-white shrink-0">
-          {form.firstName?.[0]?.toUpperCase() ?? '?'}
-        </div>
-        <div>
-          <p className="font-semibold text-slate-200">{`${form.firstName} ${form.lastName}`.trim() || 'Your Profile'}</p>
+
+      {/* Photo uploads */}
+      <div className="flex items-start gap-8">
+        <AvatarUpload
+          currentUrl={avatarUrl}
+          label="Profile photo"
+          bucket="avatars"
+          pathPrefix={userId}
+          onUploaded={(url) => setAvatarUrl(url)}
+        />
+        <AvatarUpload
+          currentUrl={agencyLogoUrl}
+          label="Agency logo"
+          bucket="avatars"
+          pathPrefix={userId}
+          onUploaded={(url) => setAgencyLogoUrl(url)}
+        />
+        <div className="pt-1">
+          <p className="font-semibold text-slate-200">{displayName}</p>
           <p className="text-sm text-slate-500">{email}</p>
+          <p className="text-xs text-slate-600 mt-2">Click either image to upload.<br />Max 5 MB · JPG, PNG, or WebP.</p>
         </div>
       </div>
+
       <div className="grid grid-cols-2 gap-4">
         <Input label="First Name" value={form.firstName} onChange={set('firstName')} placeholder="First name" />
         <Input label="Last Name"  value={form.lastName}  onChange={set('lastName')}  placeholder="Last name" />

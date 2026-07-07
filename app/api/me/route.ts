@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 
 const PROFILE_FIELDS = [
-  'full_name', 'email', 'role', 'avatar_url', 'phone',
+  'full_name', 'email', 'role', 'avatar_url', 'agency_logo_url', 'phone',
   'license_number', 'bio', 'default_state', 'agency_name',
   'agency_phone', 'agency_email', 'agency_website', 'agency_tax_id',
   'agency_address', 'agency_city', 'agency_state',
@@ -42,6 +42,7 @@ export async function GET() {
       fullName: profile?.full_name ?? null,
       role: profile?.role ?? 'agent',
       avatarUrl: profile?.avatar_url ?? null,
+      agencyLogoUrl: profile?.agency_logo_url ?? null,
       phone: profile?.phone ?? null,
       licenseNumber: profile?.license_number ?? null,
       bio: profile?.bio ?? null,
@@ -114,6 +115,8 @@ export async function PATCH(req: NextRequest) {
   if (body.agencyAddress !== undefined) update.agency_address = body.agencyAddress.trim().slice(0, 300);
   if (body.agencyCity !== undefined) update.agency_city   = body.agencyCity.trim().slice(0, 100);
   if (body.agencyState !== undefined) update.agency_state = body.agencyState.trim().slice(0, 50);
+  if (body.avatarUrl      !== undefined) update.avatar_url       = body.avatarUrl;
+  if (body.agencyLogoUrl  !== undefined) update.agency_logo_url  = body.agencyLogoUrl;
   if (body.notificationPreferences !== undefined) update.notification_preferences = body.notificationPreferences;
   if (body.aiPreferences !== undefined) update.ai_preferences = body.aiPreferences;
   if (body.coachingPreferences !== undefined) update.coaching_preferences = body.coachingPreferences;

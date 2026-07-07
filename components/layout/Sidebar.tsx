@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from '@/app/(auth)/actions';
 import { useSubscription } from '@/hooks/useSubscription';
 
 type MeResponse = {
-  user: { email: string; fullName: string | null; role: string };
+  user: { email: string; fullName: string | null; role: string; avatarUrl?: string | null };
   todayStats: { calls: number; appointments: number; policiesWritten: number; avgScore: number | null };
 };
 
@@ -65,9 +66,9 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
     `}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/6">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-lg"
-          style={{ background: 'linear-gradient(135deg, #D4AF37, #9a7a0a)', boxShadow: '0 4px 16px rgba(212,175,55,0.35)' }}>
-          <LogoIcon />
+        <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 shadow-lg flex items-center justify-center"
+          style={{ boxShadow: '0 4px 16px rgba(212,175,55,0.35)' }}>
+          <Image src="/logo.png" alt="FE Live Coach AI" width={36} height={36} className="object-cover w-full h-full" />
         </div>
         {!collapsed && (
           <div className="min-w-0">
@@ -156,9 +157,11 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
             title={collapsed ? 'Sign out' : undefined}
             className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors text-left ${collapsed ? 'justify-center' : ''}`}
           >
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[#090d18] text-xs font-extrabold"
-              style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
-              {initials}
+            <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[#090d18] text-xs font-extrabold"
+              style={me?.user.avatarUrl ? {} : { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
+              {me?.user.avatarUrl
+                ? <Image src={me.user.avatarUrl} alt={displayName} width={32} height={32} className="w-full h-full object-cover" />
+                : initials}
             </div>
             {!collapsed && (
               <div className="min-w-0 flex-1">
