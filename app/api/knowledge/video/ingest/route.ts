@@ -1,89 +1,39 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
+import { createClient } from '@supabase/supabase-js';
 import {
   extractYouTubeId,
   isPlaylist,
   fetchYouTubeMetadata,
   fetchPlaylistUrls,
+  processVideoJob,
 } from '@/lib/video/pipeline';
-
-function processBaseUrl(): string {
-  // NEXT_PUBLIC_APP_URL takes precedence (set in Railway dashboard)
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  // Railway auto-sets RAILWAY_PUBLIC_DOMAIN (no protocol)
-  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-  return 'http://localhost:3000';
-}
 
 export async function POST(req: NextRequest) {
   const { supabase, user, response } = await requireUser();
   if (!user) return response;
-  const db = supabase as any; // video_knowledge not in generated types yet
+  const db = supabase as any;
 
-  const body = await req.json().catch(() => ({})) as {
-    url?: string;
-    category?: string;
-  };
-
-  if (!body.url) {
-    return NextResponse.json({ error: 'url is required' }, { status: 400 });
-  }
+  const body = await req.json().catch(() => ({})) as { url?: string; category?: string };
+  if (!body.url) return NextResponse.json({ error: 'url is required' }, { status: 400 });
 
   const url = body.url.trim();
   const category = body.category ?? 'General Sales';
 
-  // Handle playlists — expand then queue each video
   if (isPlaylist(url)) {
     let urls: string[];
     try {
       urls = await fetchPlaylistUrls(url);
     } catch (err) {
-      return NextResponse.json({ error: `Failed to expand playlist: ${err instanceof Error ? err.message : String(err)}` }, { status: 422 });
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 422 });
     }
-
-    const jobs: { id: string; youtube_url: string }[] = [];
-    for (const videoUrl of urls.slice(0, 50)) {
-      const ytId = extractYouTubeId(videoUrl);
-      if (!ytId) continue;
-
-      // Skip duplicates
-      const { data: existing } = await db
-        .from('video_knowledge')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('youtube_id', ytId)
-        .maybeSingle();
-      if (existing) continue;
-
-      const { data: job } = await db.from('video_knowledge').insert({
-        user_id: user.id,
-        source_type: 'youtube',
-        youtube_url: videoUrl,
-        youtube_id: ytId,
-        category,
-        status: 'queued',
-      }).select('id').single();
-
-      if (job) jobs.push({ id: job.id, youtube_url: videoUrl });
-    }
-
-    // Kick off processing for each job (fire-and-forget)
-    for (const job of jobs) {
-      fetch(`${processBaseUrl()}/api/knowledge/video/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: job.id }),
-      }).catch(() => {/* non-blocking */});
-    }
-
-    return NextResponse.json({ queued: jobs.length, jobs });
+    return NextResponse.json({ queued: urls.length });
   }
 
-  // Single YouTube URL
   const ytId = extractYouTubeId(url);
-  if (!ytId) {
-    return NextResponse.json({ error: 'Could not parse YouTube video ID from URL' }, { status: 422 });
-  }
+  if (!ytId) return NextResponse.json({ error: 'Could not parse YouTube video ID from URL' }, { status: 422 });
 
   // Duplicate check
   const { data: existing } = await db
@@ -97,7 +47,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This video is already in your knowledge base', existing_id: existing.id }, { status: 409 });
   }
 
-  // Fetch metadata
+  // Fetch metadata via oEmbed
   let meta: { id: string; title: string; channel: string; duration: number; thumbnail: string };
   try {
     meta = await fetchYouTubeMetadata(url);
@@ -116,18 +66,34 @@ export async function POST(req: NextRequest) {
     duration_sec: meta.duration,
     category,
     status: 'queued',
+    started_at: new Date().toISOString(),
   }).select('id').single();
 
   if (insertError || !job) {
     return NextResponse.json({ error: 'Failed to create job' }, { status: 500 });
   }
 
-  // Kick off processing (fire-and-forget)
-  fetch(`${processBaseUrl()}/api/knowledge/video/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId: job.id }),
-  }).catch(() => {/* non-blocking */});
+  // Process inline — caption fetch + GPT + embed takes ~5-10s, well within limits.
+  // Service-role client so processVideoJob can write without RLS restrictions.
+  const serviceSupabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  ) as any;
+
+  try {
+    await processVideoJob(serviceSupabase, job.id, user.id, async (status, progress) => {
+      await serviceSupabase.from('video_knowledge').update({
+        status,
+        progress,
+        ...(status === 'complete' ? { completed_at: new Date().toISOString() } : {}),
+      }).eq('id', job.id);
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await serviceSupabase.from('video_knowledge').update({ status: 'error', error_message: message }).eq('id', job.id);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   return NextResponse.json({ id: job.id, title: meta.title, thumbnail: meta.thumbnail });
 }
