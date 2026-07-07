@@ -228,7 +228,13 @@ async function persistScore(
     user_id: userId,
     call_id: callId,
     overall_score: report.overallScore ?? 0,
-    scores: normalizeScoreMap(report.scores ?? {}),
+    // Merge scores + categoryScores so stage analytics always have data.
+    // categoryScores is the authoritative source (used for overall_score);
+    // scores adds extra keys (introduction, existingCoverage, emotion, etc.).
+    scores: normalizeScoreMap({
+      ...(report.scores ?? {}),
+      ...(report.categoryScores ?? {}),   // categoryScores wins on overlap
+    }),
     quality_scores: normalizeScoreMap(report.qualityScores ?? {}),
     timeline: body.timeline ?? [],
     report_details: {
