@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 function dateToDayKey(iso: string): string {
-  return iso.slice(0, 10); // YYYY-MM-DD
+  return iso.slice(0, 10);
 }
 
 function computeCurrentStreak(days: Set<string>): number {
@@ -49,32 +49,33 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const db = supabase as any;
 
-  // Fetch all completed call dates (up to 365 days)
   const since = new Date();
   since.setDate(since.getDate() - 365);
 
-  const { data: callRows } = await db
-    .from('calls')
-    .select('started_at')
-    .eq('user_id', user.id)
-    .eq('status', 'completed')
-    .gte('started_at', since.toISOString())
-    .order('started_at', { ascending: true });
+  // Start of current week (Monday)
+  const startOfWeek = new Date();
+  const dow = startOfWeek.getDay();
+  startOfWeek.setDate(startOfWeek.getDate() - (dow === 0 ? 6 : dow - 1));
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  // Start of current month
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const [{ data: callRows }, { data: scoreRows }, { data: weekCalls }, { data: monthCalls }] = await Promise.all([
+    db.from('calls').select('started_at').eq('user_id', user.id).eq('status', 'completed').gte('started_at', since.toISOString()).order('started_at', { ascending: true }),
+    db.from('call_scores').select('overall_score, created_at').eq('user_id', user.id).gte('created_at', since.toISOString()).order('created_at', { ascending: true }),
+    db.from('calls').select('id').eq('user_id', user.id).eq('status', 'completed').gte('started_at', startOfWeek.toISOString()),
+    db.from('calls').select('id, outcome').eq('user_id', user.id).eq('status', 'completed').gte('started_at', startOfMonth.toISOString()),
+  ]);
 
   const callDays = (callRows ?? []).map((r: { started_at: string }) => dateToDayKey(r.started_at));
   const callDaySet = new Set<string>(callDays);
 
-  // Fetch call_scores for score-based streaks
-  const { data: scoreRows } = await db
-    .from('call_scores')
-    .select('overall_score, created_at')
-    .eq('user_id', user.id)
-    .gte('created_at', since.toISOString())
-    .order('created_at', { ascending: true });
-
   const scores = (scoreRows ?? []) as { overall_score: number; created_at: string }[];
 
-  // Days where avg score >= 80 (high performance days)
+  // Days where avg score >= 80
   const scoreDayMap = new Map<string, number[]>();
   scores.forEach((r) => {
     const day = dateToDayKey(r.created_at);
@@ -88,9 +89,9 @@ export async function GET() {
       .map(([day]) => day)
   );
 
-  // Score improvement streak: days where avg score is higher than the day before
+  // Score improvement streak
   const scoreDaysSorted = [...scoreDayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  let improvStreak = 0, longestImprovStreak = 0, currentImprovStreak = 0;
+  let longestImprovStreak = 0, currentImprovStreak = 0;
   for (let i = 1; i < scoreDaysSorted.length; i++) {
     const prevAvg = scoreDaysSorted[i - 1][1].reduce((a, b) => a + b, 0) / scoreDaysSorted[i - 1][1].length;
     const currAvg = scoreDaysSorted[i][1].reduce((a, b) => a + b, 0) / scoreDaysSorted[i][1].length;
@@ -101,31 +102,27 @@ export async function GET() {
       currentImprovStreak = 0;
     }
   }
-  // Check if current improvement streak is ongoing
   const lastTwo = scoreDaysSorted.slice(-2);
+  let improvStreak = 0;
   if (lastTwo.length === 2) {
     const prevAvg = lastTwo[0][1].reduce((a, b) => a + b, 0) / lastTwo[0][1].length;
     const currAvg = lastTwo[1][1].reduce((a, b) => a + b, 0) / lastTwo[1][1].length;
     improvStreak = currAvg > prevAvg ? currentImprovStreak : 0;
   }
 
-  const consecutiveCallDays = computeCurrentStreak(callDaySet);
-  const longestCallStreak = computeLongestStreak(callDays);
-  const consecutiveHighScoreDays = computeCurrentStreak(highScoreDays);
-  const longestHighScoreStreak = computeLongestStreak([...highScoreDays]);
-
-  // Total calls and scored calls
-  const totalCallDays = callDaySet.size;
-  const totalScoredCalls = scores.length;
+  const callsThisWeek = (weekCalls ?? []).length;
+  const policiesThisMonth = (monthCalls ?? []).filter((c: { outcome: string }) => c.outcome === 'policy_written').length;
 
   return NextResponse.json({
-    consecutiveCallDays,
-    longestCallStreak,
-    consecutiveHighScoreDays,
-    longestHighScoreStreak,
-    currentImprovementStreak: improvStreak,
-    longestImprovementStreak: longestImprovStreak,
-    totalCallDays,
-    totalScoredCalls,
+    consecutiveCallDays:       computeCurrentStreak(callDaySet),
+    longestCallStreak:         computeLongestStreak(callDays),
+    consecutiveHighScoreDays:  computeCurrentStreak(highScoreDays),
+    longestHighScoreStreak:    computeLongestStreak([...highScoreDays]),
+    currentImprovementStreak:  improvStreak,
+    longestImprovementStreak:  longestImprovStreak,
+    totalCallDays:             callDaySet.size,
+    totalScoredCalls:          scores.length,
+    callsThisWeek,
+    policiesThisMonth,
   });
 }

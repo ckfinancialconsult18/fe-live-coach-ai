@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Window = '7' | '30' | '90';
-type Tab = 'overview' | 'brief' | 'coaching' | 'goals' | 'insights';
+type Tab = 'overview' | 'brief' | 'coaching' | 'goals' | 'insights' | 'trends' | 'achievements' | 'team';
 
 interface StageRanking {
   key: string; label: string; avg: number | null; callCount: number; trend: 'up' | 'down' | 'flat';
@@ -26,10 +26,12 @@ interface BriefData {
   strongestSkill: { label: string; avg: number } | null;
   weakestSkill: { label: string; avg: number } | null;
   biggestImprovement: { label: string; avg: number; delta: number } | null;
+  mostImprovedSkill: { label: string; avg: number; delta: number } | null;
   topObjection: string | null; topMissedDiscovery: string | null;
-  closingTrend: { date: string; score: number }[];
+  closingTrend: ScoreDot[];
   topFocus: string | null;
   stageDeltas: { key: string; label: string; avg: number; delta: number | null }[];
+  coachSummary: string | null;
 }
 
 interface CoachingPlan {
@@ -43,26 +45,57 @@ interface CoachingPlan {
   error?: string;
 }
 
-type GoalType = 'calls_per_day' | 'appointments_per_day' | 'policies_per_day' | 'target_close_rate' | 'avg_call_score';
+type GoalType =
+  | 'calls_per_day' | 'appointments_per_day' | 'policies_per_day'
+  | 'applications_submitted' | 'target_close_rate' | 'avg_call_score'
+  | 'avg_discovery_score' | 'avg_rapport_score';
+
 interface GoalProgress {
-  id: string; goal_type: GoalType; target: number; current: number; pct: number; met: boolean; label?: string;
+  id: string; goal_type: GoalType; target: number; current: number;
+  pct: number; met: boolean; remaining: number; estimatedDate: string | null; label?: string;
 }
-interface GoalsData {
-  goals: GoalProgress[];
-  labels: Record<GoalType, string>;
-}
+interface GoalsData { goals: GoalProgress[]; labels: Record<GoalType, string> }
 
 interface StreakData {
   consecutiveCallDays: number; longestCallStreak: number;
   consecutiveHighScoreDays: number; longestHighScoreStreak: number;
   currentImprovementStreak: number; longestImprovementStreak: number;
   totalCallDays: number; totalScoredCalls: number;
+  callsThisWeek: number; policiesThisMonth: number;
 }
 
 interface Insight {
   id: string; text: string; category: 'strength' | 'gap' | 'trend' | 'opportunity'; metric: string; confidence: 'high' | 'medium';
 }
 interface InsightsData { insights: Insight[]; callCount: number; message?: string; error?: string }
+
+interface TrendsData {
+  window: number; callCount: number; scoreCount: number;
+  scoreOverTime: ScoreDot[];
+  avgScoreOverTime: ScoreDot[];
+  callVolume: { date: string; count: number }[];
+  policiesPerDay: { date: string; count: number }[];
+  closeRateOverTime: { date: string; rate: number }[];
+  stageTrends: { key: string; label: string; points: ScoreDot[] }[];
+}
+
+interface Achievement {
+  id: string; name: string; description: string; icon: string;
+  category: 'volume' | 'quality' | 'consistency' | 'mastery';
+  earned: boolean; earnedAt?: string; progress: number; progressLabel: string;
+}
+interface AchievementsData {
+  achievements: Achievement[]; earned: number; total: number;
+  totalCalls: number; totalPolicies: number; bestScore: number;
+}
+
+interface AgencyMember {
+  id: string; name: string; email: string; role: string;
+  avgScore: number | null; callCount: number; closeRate: number;
+  strongestStage: string | null; weakestStage: string | null;
+  trend: 'up' | 'down' | 'flat';
+}
+interface AgencyData { id: string; name: string; role: string; members?: AgencyMember[] }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,16 +123,27 @@ function EmptyCard({ msg }: { msg: string }) {
 export default function PerformancePage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [win, setWin] = useState<Window>('30');
+  const [isOwner, setIsOwner] = useState(false);
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'overview',  label: 'Overview' },
-    { id: 'brief',     label: 'Morning Brief' },
-    { id: 'coaching',  label: 'Coaching Plan' },
-    { id: 'goals',     label: 'Goals' },
-    { id: 'insights',  label: 'Insights' },
+  // Check if user is agency owner to show Team tab
+  useEffect(() => {
+    fetch('/api/agency').then((r) => r.ok ? r.json() : null).then((d) => {
+      if (d?.role === 'owner') setIsOwner(true);
+    }).catch(() => {});
+  }, []);
+
+  const baseTabs: { id: Tab; label: string }[] = [
+    { id: 'overview',     label: 'Overview' },
+    { id: 'brief',        label: 'Morning Brief' },
+    { id: 'coaching',     label: 'Coaching Plan' },
+    { id: 'goals',        label: 'Goals' },
+    { id: 'insights',     label: 'Insights' },
+    { id: 'trends',       label: 'Trends' },
+    { id: 'achievements', label: 'Achievements' },
   ];
+  const tabs = isOwner ? [...baseTabs, { id: 'team' as Tab, label: 'Team' }] : baseTabs;
 
-  const showWindow = tab === 'overview' || tab === 'brief' || tab === 'insights';
+  const showWindow = tab === 'overview' || tab === 'brief' || tab === 'insights' || tab === 'trends';
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -131,16 +175,19 @@ export default function PerformancePage() {
         ))}
       </div>
 
-      {tab === 'overview'  && <OverviewTab win={win} />}
-      {tab === 'brief'     && <BriefTab win={win} />}
-      {tab === 'coaching'  && <CoachingTab />}
-      {tab === 'goals'     && <GoalsTab />}
-      {tab === 'insights'  && <InsightsTab win={win} />}
+      {tab === 'overview'     && <OverviewTab win={win} />}
+      {tab === 'brief'        && <BriefTab win={win} />}
+      {tab === 'coaching'     && <CoachingTab />}
+      {tab === 'goals'        && <GoalsTab />}
+      {tab === 'insights'     && <InsightsTab win={win} />}
+      {tab === 'trends'       && <TrendsTab win={win} />}
+      {tab === 'achievements' && <AchievementsTab />}
+      {tab === 'team'         && <AgencyTeamTab />}
     </div>
   );
 }
 
-// ── Overview Tab (Phase 1 content) ────────────────────────────────────────────
+// ── Overview Tab ──────────────────────────────────────────────────────────────
 
 function OverviewTab({ win }: { win: Window }) {
   const [data, setData] = useState<PerfData | null>(null);
@@ -177,13 +224,12 @@ function OverviewTab({ win }: { win: Window }) {
             {data.stageRankings.map((s) => {
               const rank = data.ranked.findIndex((r) => r.key === s.key);
               const isTop = rank === 0, isBot = rank === data.ranked.length - 1 && data.ranked.length > 1;
-              const trendDir = s.trend === 'up' ? 'up' : s.trend === 'down' ? 'down' : 'flat';
               return (
                 <div key={s.key}>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[10px] w-4 text-slate-600 text-right">{rank + 1}</span>
                     <span className="text-xs text-slate-300 flex-1">{s.label}</span>
-                    <TrendArrow dir={trendDir} />
+                    <TrendArrow dir={s.trend} />
                     {isTop && <span className="text-[10px] text-green-400">★</span>}
                     {isBot && <span className="text-[10px] text-red-400">⚠</span>}
                     <span className="text-xs font-bold w-8 text-right" style={{ color: s.avg !== null ? scoreColor(s.avg) : '#475569' }}>{s.avg ?? '—'}</span>
@@ -292,13 +338,17 @@ function BriefTab({ win }: { win: Window }) {
 
   return (
     <div className="space-y-5">
-      {/* Banner */}
+      {/* AI Coach Summary Banner */}
       <div className="glass-card rounded-2xl p-5 border border-[#D4AF37]/20" style={{ background: 'linear-gradient(135deg, rgba(212,175,55,0.06) 0%, transparent 60%)' }}>
-        <p className="text-[11px] font-semibold text-[#D4AF37] uppercase tracking-wider mb-1">Your Morning Brief</p>
-        <h3 className="text-lg font-bold text-slate-100">
-          {data.trendDirection === 'up' ? 'You\'re improving — keep the momentum.' : data.trendDirection === 'down' ? 'Time to tighten up — here\'s your focus.' : 'Steady performance — here\'s your snapshot.'}
-        </h3>
-        <p className="text-xs text-slate-500 mt-1">Based on {data.callCount} calls over the last {win} days</p>
+        <p className="text-[11px] font-semibold text-[#D4AF37] uppercase tracking-wider mb-2">Your Morning Brief</p>
+        {data.coachSummary ? (
+          <p className="text-sm text-slate-200 leading-relaxed">{data.coachSummary}</p>
+        ) : (
+          <h3 className="text-lg font-bold text-slate-100">
+            {data.trendDirection === 'up' ? 'You\'re improving — keep the momentum.' : data.trendDirection === 'down' ? 'Time to tighten up — here\'s your focus.' : 'Steady performance — here\'s your snapshot.'}
+          </h3>
+        )}
+        <p className="text-xs text-slate-500 mt-2">Based on {data.callCount} calls over the last {win} days</p>
       </div>
 
       {/* KPI row */}
@@ -341,12 +391,12 @@ function BriefTab({ win }: { win: Window }) {
           )}
 
           <div className="pt-3 border-t border-white/6 space-y-3">
-            {data.biggestImprovement && (
+            {data.mostImprovedSkill && (
               <div className="flex items-start gap-2">
                 <span className="text-green-400 mt-0.5">↑</span>
                 <div>
-                  <p className="text-xs font-medium text-slate-200">Biggest improvement</p>
-                  <p className="text-xs text-slate-400">{data.biggestImprovement.label} +{data.biggestImprovement.delta} pts vs last period</p>
+                  <p className="text-xs font-medium text-slate-200">Most improved this period</p>
+                  <p className="text-xs text-slate-400">{data.mostImprovedSkill.label} +{data.mostImprovedSkill.delta} pts vs last period</p>
                 </div>
               </div>
             )}
@@ -372,7 +422,6 @@ function BriefTab({ win }: { win: Window }) {
         </div>
       </div>
 
-      {/* Top coaching focus */}
       {data.topFocus && (
         <div className="glass-card rounded-2xl p-5 border border-[#D4AF37]/15" style={{ background: 'rgba(212,175,55,0.04)' }}>
           <p className="text-[11px] font-semibold text-[#D4AF37] uppercase tracking-wider mb-1">Top Recommended Coaching Focus</p>
@@ -399,7 +448,7 @@ function CoachingTab() {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
 
-  useEffect(() => { load(); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
 
   if (loading) return <Spinner />;
 
@@ -414,7 +463,6 @@ function CoachingTab() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="glass-card rounded-2xl p-4 flex-1 border border-[#D4AF37]/15" style={{ background: 'rgba(212,175,55,0.04)' }}>
           <p className="text-[11px] font-semibold text-[#D4AF37] uppercase tracking-wider mb-1">Personalized AI Coaching Plan</p>
@@ -432,7 +480,6 @@ function CoachingTab() {
         </button>
       </div>
 
-      {/* Top 3 priorities */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-slate-200">Top 3 Priorities for Today</h3>
         <div className="space-y-4">
@@ -450,7 +497,6 @@ function CoachingTab() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        {/* Scripts to practice */}
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-slate-200">Scripts to Practice</h3>
           <div className="space-y-4">
@@ -465,7 +511,6 @@ function CoachingTab() {
           </div>
         </div>
 
-        {/* Discovery questions */}
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-slate-200">Discovery Questions to Improve</h3>
           <ul className="space-y-2.5">
@@ -477,7 +522,6 @@ function CoachingTab() {
             ))}
           </ul>
 
-          {/* Closing recommendation */}
           {plan.closingRecommendation && (
             <div className="pt-3 border-t border-white/6">
               <p className="text-[11px] font-semibold text-purple-400 uppercase tracking-wider mb-1.5">Closing Recommendation</p>
@@ -487,7 +531,6 @@ function CoachingTab() {
         </div>
       </div>
 
-      {/* Objection handling */}
       {(plan.objectionHandlingFocus ?? []).length > 0 && (
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-slate-200">Objection Handling Focus</h3>
@@ -513,17 +556,31 @@ function CoachingTab() {
 
 // ── Goals Tab ─────────────────────────────────────────────────────────────────
 
-const ALL_GOAL_TYPES: GoalType[] = ['calls_per_day', 'appointments_per_day', 'policies_per_day', 'target_close_rate', 'avg_call_score'];
+const ALL_GOAL_TYPES: GoalType[] = [
+  'calls_per_day', 'appointments_per_day', 'policies_per_day', 'applications_submitted',
+  'target_close_rate', 'avg_call_score', 'avg_discovery_score', 'avg_rapport_score',
+];
+
 const GOAL_LABELS: Record<GoalType, string> = {
-  calls_per_day: 'Calls per day',
-  appointments_per_day: 'Appointments per day',
-  policies_per_day: 'Policies written per day',
-  target_close_rate: 'Close rate (%)',
-  avg_call_score: 'Avg call score',
+  calls_per_day:          'Calls per day',
+  appointments_per_day:   'Appointments per day',
+  policies_per_day:       'Policies written per day',
+  applications_submitted: 'Applications submitted per day',
+  target_close_rate:      'Close rate (30d %)',
+  avg_call_score:         'Avg call score (30d)',
+  avg_discovery_score:    'Avg discovery score (30d)',
+  avg_rapport_score:      'Avg rapport score (30d)',
 };
+
 const GOAL_UNITS: Record<GoalType, string> = {
-  calls_per_day: 'calls', appointments_per_day: 'appts', policies_per_day: 'policies',
-  target_close_rate: '%', avg_call_score: 'pts',
+  calls_per_day:          'calls',
+  appointments_per_day:   'appts',
+  policies_per_day:       'policies',
+  applications_submitted: 'apps',
+  target_close_rate:      '%',
+  avg_call_score:         'pts',
+  avg_discovery_score:    'pts',
+  avg_rapport_score:      'pts',
 };
 
 function GoalsTab() {
@@ -575,12 +632,28 @@ function GoalsTab() {
       {/* Streaks */}
       {streaks && (
         <div className="glass-card rounded-2xl p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4">Streaks</h3>
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          <h3 className="text-sm font-semibold text-slate-200 mb-4">Streaks &amp; Activity</h3>
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
             <StreakCard label="Call streak" current={streaks.consecutiveCallDays} best={streaks.longestCallStreak} unit="days" color="#D4AF37" />
             <StreakCard label="High-score streak" current={streaks.consecutiveHighScoreDays} best={streaks.longestHighScoreStreak} unit="days" color="#22c55e" />
             <StreakCard label="Improvement streak" current={streaks.currentImprovementStreak} best={streaks.longestImprovementStreak} unit="days" color="#a78bfa" />
-            <StreakCard label="Total active days" current={streaks.totalCallDays} best={streaks.totalCallDays} unit="days" color="#64748b" hideStreak />
+          </div>
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="rounded-xl p-4 bg-white/3 border border-white/6">
+              <p className="text-[11px] text-slate-500 mb-1">Calls this week</p>
+              <p className="text-2xl font-bold text-[#D4AF37]">{streaks.callsThisWeek}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">since Monday</p>
+            </div>
+            <div className="rounded-xl p-4 bg-white/3 border border-white/6">
+              <p className="text-[11px] text-slate-500 mb-1">Policies this month</p>
+              <p className="text-2xl font-bold text-green-400">{streaks.policiesThisMonth}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">written this month</p>
+            </div>
+            <div className="rounded-xl p-4 bg-white/3 border border-white/6">
+              <p className="text-[11px] text-slate-500 mb-1">Active calling days</p>
+              <p className="text-2xl font-bold text-slate-400">{streaks.totalCallDays}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">all time</p>
+            </div>
           </div>
         </div>
       )}
@@ -624,7 +697,7 @@ function GoalsTab() {
         {(!data?.goals || data.goals.length === 0) ? (
           <p className="text-xs text-slate-600 text-center py-4">No goals set yet. Click &ldquo;Add goal&rdquo; to set your first target.</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {data.goals.map((g) => (
               <div key={g.id}>
                 <div className="flex items-center gap-3 mb-1.5">
@@ -636,6 +709,16 @@ function GoalsTab() {
                 </div>
                 <div className="h-2 rounded-full bg-white/5">
                   <div className="h-2 rounded-full transition-all duration-700" style={{ width: `${g.pct}%`, background: g.met ? '#22c55e' : '#D4AF37' }} />
+                </div>
+                <div className="flex items-center gap-4 mt-1.5">
+                  {!g.met && g.remaining > 0 && (
+                    <span className="text-[10px] text-slate-500">
+                      {g.remaining} {GOAL_UNITS[g.goal_type]} remaining
+                    </span>
+                  )}
+                  {g.estimatedDate && !g.met && (
+                    <span className="text-[10px] text-slate-600">· {g.estimatedDate}</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -669,27 +752,23 @@ function InsightsTab({ win }: { win: Window }) {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [win]);
 
-  useEffect(() => { load(); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
 
   if (loading) return <Spinner />;
-
   if (data?.message && !data.insights?.length) return <EmptyCard msg={data.message} />;
   if (data?.error) return <EmptyCard msg={data.error} />;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-slate-500">
-            {data?.callCount ?? 0} calls analyzed · All insights backed by real call data
-          </p>
-        </div>
+        <p className="text-xs text-slate-500">
+          {data?.callCount ?? 0} calls analyzed · All insights backed by real call data
+        </p>
         <button onClick={() => load(true)} disabled={refreshing} className="text-xs text-[#D4AF37] hover:underline disabled:opacity-40">
           {refreshing ? 'Generating…' : 'Regenerate'}
         </button>
       </div>
 
-      {/* Category summary */}
       <div className="flex gap-2 flex-wrap">
         {Object.entries(INSIGHT_COLORS).map(([cat, style]) => {
           const count = (data?.insights ?? []).filter((i) => i.category === cat).length;
@@ -724,6 +803,362 @@ function InsightsTab({ win }: { win: Window }) {
   );
 }
 
+// ── Trends Tab ────────────────────────────────────────────────────────────────
+
+type TrendsWindow = '7' | '30' | '90' | 'all';
+
+function TrendsTab({ win }: { win: Window }) {
+  const [data, setData] = useState<TrendsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tWin, setTWin] = useState<TrendsWindow>(win);
+
+  const load = useCallback((w: TrendsWindow) => {
+    setLoading(true);
+    fetch(`/api/performance/trends?window=${w}`)
+      .then((r) => r.json()).then((d) => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(tWin); }, [tWin, load]);
+
+  const wins: { id: TrendsWindow; label: string }[] = [
+    { id: '7', label: '7d' }, { id: '30', label: '30d' },
+    { id: '90', label: '90d' }, { id: 'all', label: 'All' },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* Window selector */}
+      <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit">
+        {wins.map((w) => (
+          <button key={w.id} onClick={() => setTWin(w.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${tWin === w.id ? 'bg-[#D4AF37] text-slate-950' : 'text-slate-400 hover:text-slate-200'}`}>
+            {w.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <Spinner /> : !data || data.scoreCount === 0 ? (
+        <EmptyCard msg="No scored call data in this window to display trends." />
+      ) : (
+        <div className="space-y-5">
+          {/* Score over time */}
+          <div className="glass-card rounded-2xl p-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-200">Average Score Over Time</h3>
+              <p className="text-xs text-slate-500 mt-0.5">{data.scoreCount} scored calls · daily average</p>
+            </div>
+            {data.avgScoreOverTime.length > 1 ? (
+              <ScoreChart dots={data.avgScoreOverTime} />
+            ) : (
+              <p className="text-xs text-slate-600">Not enough data points to chart</p>
+            )}
+          </div>
+
+          {/* 3-column metric charts */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <TrendMetricCard
+              title="Close Rate"
+              subtitle="Policies written / calls per day"
+              data={data.closeRateOverTime.map((d) => ({ date: d.date, score: d.rate }))}
+              unit="%"
+              color="#22c55e"
+            />
+            <TrendMetricCard
+              title="Call Volume"
+              subtitle="Completed calls per day"
+              data={data.callVolume.map((d) => ({ date: d.date, score: d.count }))}
+              unit="calls"
+              color="#D4AF37"
+              isBar
+            />
+            <TrendMetricCard
+              title="Policies Written"
+              subtitle="Policies per day"
+              data={data.policiesPerDay.map((d) => ({ date: d.date, score: d.count }))}
+              unit="policies"
+              color="#a78bfa"
+              isBar
+            />
+          </div>
+
+          {/* Stage trends */}
+          {data.stageTrends.length > 0 && (
+            <div className="glass-card rounded-2xl p-5 space-y-5">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200">Stage Score Trends</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Daily average for each key stage</p>
+              </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                {data.stageTrends.map((s) => (
+                  <div key={s.key} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-slate-300">{s.label}</p>
+                      {s.points.length > 0 && (
+                        <p className="text-xs font-bold" style={{ color: scoreColor(s.points[s.points.length - 1]?.score ?? 0) }}>
+                          {s.points[s.points.length - 1]?.score ?? '—'}
+                        </p>
+                      )}
+                    </div>
+                    <ScoreChart dots={s.points} compact />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrendMetricCard({ title, subtitle, data, unit, color, isBar }: {
+  title: string; subtitle: string; data: ScoreDot[]; unit: string; color: string; isBar?: boolean;
+}) {
+  const latest = data[data.length - 1]?.score ?? null;
+  const first = data[0]?.score ?? null;
+  const delta = (latest !== null && first !== null) ? latest - first : null;
+
+  return (
+    <div className="glass-card rounded-2xl p-5 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+        <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+      </div>
+      {latest !== null && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-2xl font-bold" style={{ color }}>{latest}</span>
+          <span className="text-xs text-slate-500">{unit}</span>
+          {delta !== null && delta !== 0 && (
+            <span className="text-xs ml-1" style={{ color: delta > 0 ? '#22c55e' : '#ef4444' }}>
+              {delta > 0 ? '+' : ''}{delta}
+            </span>
+          )}
+        </div>
+      )}
+      {data.length > 1 ? (
+        isBar ? <MiniBarChart data={data} color={color} /> : <ScoreChart dots={data} compact color={color} />
+      ) : (
+        <p className="text-xs text-slate-600 py-4">Not enough data</p>
+      )}
+    </div>
+  );
+}
+
+// ── Achievements Tab ──────────────────────────────────────────────────────────
+
+const CATEGORY_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+  volume:      { bg: 'rgba(212,175,55,0.08)',  border: 'rgba(212,175,55,0.2)',  text: '#D4AF37' },
+  quality:     { bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.2)',   text: '#22c55e' },
+  mastery:     { bg: 'rgba(167,139,250,0.08)', border: 'rgba(167,139,250,0.2)', text: '#a78bfa' },
+  consistency: { bg: 'rgba(56,189,248,0.08)',  border: 'rgba(56,189,248,0.2)',  text: '#38bdf8' },
+};
+
+function AchievementsTab() {
+  const [data, setData] = useState<AchievementsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'earned' | 'locked'>('all');
+
+  useEffect(() => {
+    fetch('/api/performance/achievements')
+      .then((r) => r.json()).then((d) => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Spinner />;
+  if (!data) return <EmptyCard msg="Could not load achievements." />;
+
+  const filtered = filter === 'earned'
+    ? data.achievements.filter((a) => a.earned)
+    : filter === 'locked'
+    ? data.achievements.filter((a) => !a.earned)
+    : data.achievements;
+
+  return (
+    <div className="space-y-5">
+      {/* Summary */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard label="Badges Earned" value={`${data.earned}/${data.total}`} sub="achievements unlocked" color="#D4AF37" />
+        <KpiCard label="Total Calls" value={String(data.totalCalls)} sub="all time" color="#22c55e" />
+        <KpiCard label="Policies Written" value={String(data.totalPolicies)} sub="all time" color="#a78bfa" />
+        <KpiCard label="Best Score" value={data.bestScore > 0 ? String(data.bestScore) : '—'} sub="single call" color={data.bestScore > 0 ? scoreColor(data.bestScore) : '#64748b'} />
+      </div>
+
+      {/* Progress bar */}
+      <div className="glass-card rounded-2xl p-5 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-200">Achievement Progress</h3>
+          <span className="text-xs text-slate-400">{data.earned} / {data.total}</span>
+        </div>
+        <div className="h-2.5 rounded-full bg-white/5">
+          <div className="h-2.5 rounded-full bg-gradient-to-r from-[#D4AF37] to-[#22c55e] transition-all duration-700"
+            style={{ width: `${Math.round((data.earned / data.total) * 100)}%` }} />
+        </div>
+        <p className="text-xs text-slate-500">{Math.round((data.earned / data.total) * 100)}% complete</p>
+      </div>
+
+      {/* Filter */}
+      <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit">
+        {(['all', 'earned', 'locked'] as const).map((f) => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${filter === f ? 'bg-[#D4AF37] text-slate-950' : 'text-slate-400 hover:text-slate-200'}`}>
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {/* Badges grid */}
+      {(['volume', 'quality', 'mastery', 'consistency'] as const).map((cat) => {
+        const catBadges = filtered.filter((a) => a.category === cat);
+        if (!catBadges.length) return null;
+        const style = CATEGORY_COLORS[cat];
+        return (
+          <div key={cat} className="glass-card rounded-2xl p-5 space-y-4">
+            <h3 className="text-sm font-semibold capitalize" style={{ color: style.text }}>
+              {cat === 'volume' ? '📦 Volume' : cat === 'quality' ? '⚡ Quality' : cat === 'mastery' ? '🎓 Mastery' : '🗓️ Consistency'}
+            </h3>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {catBadges.map((a) => (
+                <div key={a.id} className={`rounded-2xl p-4 border transition-all ${a.earned ? '' : 'opacity-50 grayscale'}`}
+                  style={{ background: a.earned ? style.bg : 'rgba(255,255,255,0.02)', borderColor: a.earned ? style.border : 'rgba(255,255,255,0.06)' }}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{a.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-200 truncate">{a.name}</p>
+                        {a.earned && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>Earned</span>}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-snug">{a.description}</p>
+                      {a.earnedAt && (
+                        <p className="text-[10px] text-slate-600 mt-1">{new Date(a.earnedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                      )}
+                    </div>
+                  </div>
+                  {!a.earned && (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-500">{a.progressLabel}</span>
+                        <span className="text-[10px] text-slate-500">{a.progress}%</span>
+                      </div>
+                      <div className="h-1 rounded-full bg-white/5">
+                        <div className="h-1 rounded-full transition-all duration-500" style={{ width: `${a.progress}%`, background: style.text }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Agency Team Tab ───────────────────────────────────────────────────────────
+
+function AgencyTeamTab() {
+  const [agency, setAgency] = useState<AgencyData | null>(null);
+  const [members, setMembers] = useState<AgencyMember[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/agency').then((r) => r.json()).then((a) => {
+      setAgency(a);
+      if (a?.id) {
+        fetch('/api/agency/members').then((r) => r.json()).then((d) => {
+          setMembers(d?.members ?? []);
+          setLoading(false);
+        }).catch(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Spinner />;
+  if (!agency?.id) return <EmptyCard msg="You are not part of an agency. Create or join one to see team performance." />;
+  if (agency.role !== 'owner') return <EmptyCard msg="Team analytics are available to agency owners only." />;
+  if (!members?.length) return <EmptyCard msg="No team members yet. Share your invite link to add agents." />;
+
+  const sortedByScore = [...members].sort((a, b) => (b.avgScore ?? 0) - (a.avgScore ?? 0));
+  const sortedByCalls = [...members].sort((a, b) => b.callCount - a.callCount);
+  const sortedByClose = [...members].sort((a, b) => b.closeRate - a.closeRate);
+
+  const teamAvgScore = members.filter((m) => m.avgScore !== null).reduce((a, m) => a + (m.avgScore ?? 0), 0) / (members.filter((m) => m.avgScore !== null).length || 1);
+  const teamTotalCalls = members.reduce((a, m) => a + m.callCount, 0);
+  const teamAvgClose = members.reduce((a, m) => a + m.closeRate, 0) / members.length;
+
+  return (
+    <div className="space-y-5">
+      {/* Team KPIs */}
+      <div className="glass-card rounded-2xl p-4 border border-[#D4AF37]/15" style={{ background: 'rgba(212,175,55,0.03)' }}>
+        <p className="text-[11px] font-semibold text-[#D4AF37] uppercase tracking-wider mb-1">{agency.name}</p>
+        <p className="text-xs text-slate-500">{members.length} agent{members.length !== 1 ? 's' : ''}</p>
+      </div>
+
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard label="Team Avg Score" value={teamAvgScore > 0 ? String(Math.round(teamAvgScore)) : '—'} sub="across all agents" color={teamAvgScore > 0 ? scoreColor(teamAvgScore) : '#64748b'} />
+        <KpiCard label="Total Team Calls" value={String(teamTotalCalls)} sub="all time" color="#D4AF37" />
+        <KpiCard label="Avg Close Rate" value={`${Math.round(teamAvgClose)}%`} sub="30-day rolling" color="#22c55e" />
+        <KpiCard label="Team Size" value={String(members.length)} sub="active agents" color="#a78bfa" />
+      </div>
+
+      {/* Leaderboard */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-200">Score Leaderboard</h3>
+        <div className="space-y-2">
+          {sortedByScore.map((m, i) => (
+            <div key={m.id} className={`flex items-center gap-3 p-3 rounded-xl ${i === 0 ? 'bg-[#D4AF37]/8 border border-[#D4AF37]/20' : 'bg-white/2'}`}>
+              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${i === 0 ? 'bg-[#D4AF37] text-slate-950' : i === 1 ? 'bg-slate-600 text-slate-200' : 'bg-white/8 text-slate-400'}`}>{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-200 truncate">{m.name || m.email}</p>
+                <p className="text-[10px] text-slate-500">{m.callCount} calls · {m.closeRate}% close rate</p>
+              </div>
+              {m.strongestStage && <span className="text-[10px] text-green-400 hidden xl:block">↑ {m.strongestStage}</span>}
+              <TrendArrow dir={m.trend} />
+              <span className="text-sm font-bold w-8 text-right" style={{ color: m.avgScore !== null ? scoreColor(m.avgScore) : '#64748b' }}>
+                {m.avgScore ?? '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Most calls / best close rate */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <div className="glass-card rounded-2xl p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-slate-200">Most Active</h3>
+          <div className="space-y-2">
+            {sortedByCalls.slice(0, 5).map((m, i) => (
+              <div key={m.id} className="flex items-center gap-3">
+                <span className="text-[11px] font-bold text-slate-600 w-4">{i + 1}</span>
+                <span className="text-xs text-slate-300 flex-1 truncate">{m.name || m.email}</span>
+                <span className="text-xs font-bold text-[#D4AF37]">{m.callCount}</span>
+                <span className="text-[10px] text-slate-500">calls</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass-card rounded-2xl p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-slate-200">Best Close Rate</h3>
+          <div className="space-y-2">
+            {sortedByClose.slice(0, 5).map((m, i) => (
+              <div key={m.id} className="flex items-center gap-3">
+                <span className="text-[11px] font-bold text-slate-600 w-4">{i + 1}</span>
+                <span className="text-xs text-slate-300 flex-1 truncate">{m.name || m.email}</span>
+                <div className="flex-1 max-w-20 h-1.5 rounded-full bg-white/5">
+                  <div className="h-1.5 rounded-full" style={{ width: `${m.closeRate}%`, background: '#22c55e' }} />
+                </div>
+                <span className="text-xs font-bold text-green-400">{m.closeRate}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Shared components ─────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, color, small }: { label: string; value: string; sub: string; color: string; small?: boolean }) {
@@ -749,9 +1184,11 @@ function StreakCard({ label, current, best, unit, color, hideStreak }: {
   );
 }
 
-function ScoreChart({ dots }: { dots: { date: string; score: number }[] }) {
-  if (dots.length === 0) return <div className="h-24 flex items-center justify-center text-xs text-slate-600">No data</div>;
-  const h = 90, w = 300, pad = 10;
+function ScoreChart({ dots, compact, color }: { dots: ScoreDot[]; compact?: boolean; color?: string }) {
+  if (dots.length === 0) return <div className="h-16 flex items-center justify-center text-xs text-slate-600">No data</div>;
+  const h = compact ? 60 : 90;
+  const w = 300;
+  const pad = 8;
   const minY = Math.min(0, ...dots.map((d) => d.score));
   const maxY = Math.max(100, ...dots.map((d) => d.score));
   const range = maxY - minY || 1;
@@ -762,26 +1199,50 @@ function ScoreChart({ dots }: { dots: { date: string; score: number }[] }) {
   }));
   const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   const areaD = `M ${pts[0].x} ${h} ${pts.map((p) => `L ${p.x} ${p.y}`).join(' ')} L ${pts[pts.length - 1].x} ${h} Z`;
+  const lineColor = color ?? '#D4AF37';
   const y80 = h - pad - ((80 - minY) / range) * (h - pad * 2);
   return (
     <div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: 100 }}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: compact ? 60 : 100 }}>
         <defs>
-          <linearGradient id="sgGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#D4AF37" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#D4AF37" stopOpacity="0" />
+          <linearGradient id={`sg-${compact ? 'c' : 'f'}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={lineColor} stopOpacity="0.2" />
+            <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
           </linearGradient>
         </defs>
-        <line x1={pad} x2={w - pad} y1={y80} y2={y80} stroke="#22c55e" strokeWidth="0.5" strokeDasharray="3 3" opacity="0.35" />
-        <path d={areaD} fill="url(#sgGrad)" />
-        <path d={pathD} fill="none" stroke="#D4AF37" strokeWidth="1.5" strokeLinejoin="round" />
-        {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={scoreColor(p.score)} />)}
+        {!compact && <line x1={pad} x2={w - pad} y1={y80} y2={y80} stroke="#22c55e" strokeWidth="0.5" strokeDasharray="3 3" opacity="0.35" />}
+        <path d={areaD} fill={`url(#sg-${compact ? 'c' : 'f'})`} />
+        <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" />
+        {!compact && pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={scoreColor(p.score)} />)}
       </svg>
-      <div className="flex justify-between text-[10px] text-slate-600 px-1 mt-0.5">
-        <span>{dots[0]?.date}</span>
-        <span className="text-slate-500">— 80 target</span>
-        <span>{dots[dots.length - 1]?.date}</span>
-      </div>
+      {!compact && (
+        <div className="flex justify-between text-[10px] text-slate-600 px-1 mt-0.5">
+          <span>{dots[0]?.date}</span>
+          <span className="text-slate-500">— 80 target</span>
+          <span>{dots[dots.length - 1]?.date}</span>
+        </div>
+      )}
     </div>
+  );
+}
+
+function MiniBarChart({ data, color }: { data: ScoreDot[]; color: string }) {
+  if (!data.length) return null;
+  const max = Math.max(...data.map((d) => d.score), 1);
+  const h = 60;
+  const w = 300;
+  const pad = 4;
+  const barW = Math.max(2, (w - pad * 2) / data.length - 1);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: 60 }}>
+      {data.map((d, i) => {
+        const barH = Math.max(2, ((d.score / max) * (h - pad * 2)));
+        const x = pad + i * ((w - pad * 2) / data.length);
+        return (
+          <rect key={i} x={x} y={h - pad - barH} width={barW} height={barH}
+            fill={color} opacity="0.7" rx="1" />
+        );
+      })}
+    </svg>
   );
 }
