@@ -1,6 +1,8 @@
 /**
  * Internal route — called by the ingest route (fire-and-forget) to run the video pipeline.
  */
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { processVideoJob } from '@/lib/video/pipeline';
