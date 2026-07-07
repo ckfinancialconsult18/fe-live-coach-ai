@@ -17,51 +17,34 @@ import { embedTexts } from '@/lib/rag/embed';
 // that plague web-scraper-based transcript libraries on shared hosting.
 
 async function fetchCaptionsViaInnertube(videoId: string): Promise<string> {
-  // Fetch the YouTube watch page and extract ytInitialPlayerResponse —
-  // same data a browser gets, most reliable way to find caption track URLs.
-  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!pageRes.ok) throw new Error(`YouTube page returned ${pageRes.status}`);
-  const html = await pageRes.text();
+  // Railway's shared IP pool is blocked by YouTube for all direct scraping.
+  // Route through Supadata — a transcript proxy with a free tier (100/day).
+  // Set SUPADATA_API_KEY in Railway environment variables.
+  // Sign up free at: https://supadata.ai
+  const supadataKey = process.env.SUPADATA_API_KEY;
+  if (!supadataKey) {
+    throw new Error(
+      'YouTube transcript fetching requires a Supadata API key. ' +
+      'Add SUPADATA_API_KEY to your Railway environment variables (free at supadata.ai).'
+    );
+  }
 
-  // Extract ytInitialPlayerResponse JSON from the page
-  const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;/s);
-  if (!match) throw new Error('Could not find player data in YouTube page');
+  const res = await fetch(
+    `https://api.supadata.ai/v1/youtube/transcript?url=https://www.youtube.com/watch?v=${videoId}&text=true`,
+    {
+      headers: { 'x-api-key': supadataKey },
+      signal: AbortSignal.timeout(30000),
+    }
+  );
 
-  let player: any;
-  try { player = JSON.parse(match[1]); } catch { throw new Error('Failed to parse player data'); }
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(`Supadata transcript API returned ${res.status}: ${err}`);
+  }
 
-  const tracks: any[] = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
-  if (!tracks.length) throw new Error('No captions available for this video');
-
-  // Prefer English auto-generated, then English manual, then first available
-  const track =
-    tracks.find((t) => t.languageCode === 'en' && t.kind === 'asr') ??
-    tracks.find((t) => t.languageCode === 'en') ??
-    tracks[0];
-
-  const captionUrl = track.baseUrl;
-
-  // Step 2: Fetch the caption XML
-  const xmlRes = await fetch(`${captionUrl}&fmt=json3`, { signal: AbortSignal.timeout(10000) });
-  if (!xmlRes.ok) throw new Error(`Caption fetch returned ${xmlRes.status}`);
-  const xml = await xmlRes.json() as any;
-
-  // Step 3: Flatten events to plain text
-  const text = (xml?.events ?? [])
-    .flatMap((e: any) => e.segs ?? [])
-    .map((s: any) => s.utf8 ?? '')
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!text) throw new Error('Caption text is empty');
+  const data = await res.json() as { content?: string; transcript?: string };
+  const text = (data.content ?? data.transcript ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) throw new Error('No captions available for this video');
   return text;
 }
 
