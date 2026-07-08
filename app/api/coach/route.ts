@@ -9,6 +9,20 @@ import { checkRateLimit, coachLimiter, interimCoachLimiter } from '@/lib/rate-li
 
 const VALID_STAGES = ['introduction', 'permission', 'discovery', 'health', 'budget', 'close'];
 
+// Fast keyword-based stage inference used to enrich the RAG query before the
+// gpt-4o-mini stage detection resolves. Keeps script chunks stage-relevant.
+function inferStageKeywords(transcript: string): string {
+  const t = transcript.toLowerCase();
+  const lines = t.split('\n').slice(-10).join(' ');
+  if (/social security|draft date|checking|savings|banking|first payment|approved|coverage amount|benefit amount/.test(lines)) return 'close script final expense';
+  if (/authorization|send you a (text|link)|verify your social|background check|run your info/.test(lines)) return 'process script final expense';
+  if (/oxygen|dialysis|cancer|alzheimer|heart|kidney|copd|diabetes|smoker|tobacco|medication|prescription|pill/.test(lines)) return 'health walk script final expense';
+  if (/who.*protect|drop dead|beneficiary|burial|cremation|existing.*policy|what.*paying|waiting period/.test(lines)) return 'situation script final expense';
+  if (/trigger|why.*looking|anything in place|nothing at all|getting back to you|reason.*calling/.test(lines)) return 'reason script final expense';
+  if (/getting back|my name is|how are you|is that you|put in charge/.test(lines)) return 'open script final expense';
+  return '';
+}
+
 function buildChecklist(transcript: string): Record<string, boolean> {
   const lower = transcript.toLowerCase();
   return {
@@ -125,10 +139,25 @@ export async function POST(req: NextRequest) {
 
   // ── Confirmed mode: full analysis with RAG + side calls + gpt-4.1 ──────────
   const lastTurns = transcript.split('\n').slice(-6).join('\n');
-  const rawChunks = await retrieveRelevantChunks(supabase, user.id, lastTurns, { matchCount: 6, minSimilarity: 0.40 }).catch(() => []);
+  // Enrich retrieval query with inferred stage so script chunks for the right
+  // stage surface even when the transcript semantics don't match script wording.
+  const inferredStage = inferStageKeywords(transcript);
+  const ragQuery = inferredStage ? `${inferredStage} ${lastTurns}` : lastTurns;
+  const [rawChunks, scriptChunks] = await Promise.all([
+    retrieveRelevantChunks(supabase, user.id, ragQuery, { matchCount: 8, minSimilarity: 0.35 }).catch(() => []),
+    // Always pull stage-specific script content even at lower similarity
+    inferredStage
+      ? retrieveRelevantChunks(supabase, user.id, inferredStage, { matchCount: 4, minSimilarity: 0.25 }).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  // Merge, dedupe by id, keep highest similarity
+  const allChunks = [...rawChunks];
+  for (const sc of scriptChunks) {
+    if (!allChunks.find((c) => c.id === sc.id)) allChunks.push(sc);
+  }
   // Re-rank by adaptive weight: docs that have driven policy writes surface first
-  const retrievedChunks = await applyAdaptiveWeights(supabase, user.id, rawChunks);
-  const topChunks = retrievedChunks.slice(0, 4);
+  const retrievedChunks = await applyAdaptiveWeights(supabase, user.id, allChunks);
+  const topChunks = retrievedChunks.slice(0, 6);
   const ragContext = formatChunksForPrompt(topChunks);
   // Fire-and-forget: log retrievals so post-call can credit these docs on a win
   logRetrieval(supabase, user.id, topChunks, callId ?? null, null);
@@ -168,7 +197,7 @@ export async function POST(req: NextRequest) {
           messages: [
             { role: 'system', content: COACH_SYSTEM_PROMPT },
             ...(ragContext
-              ? [{ role: 'system' as const, content: `Relevant material from this agent's own carrier guides, scripts, and objection-handling docs — prefer this over general knowledge when it applies:\n\n${ragContext}` }]
+              ? [{ role: 'system' as const, content: `SCRIPT & KNOWLEDGE BASE — This is the agent's own script and objection-handling material for this call. This takes priority over general knowledge.\n\nFor "recommendedResponse", "nextBestQuestion", "closingScript", and "alternativeResponses": pull language DIRECTLY from this script where it applies to the current stage and situation. Quote or closely paraphrase the script lines — do not replace them with generic sales advice when a script line fits.\n\n${ragContext}` }]
               : []),
             {
               role: 'user',
