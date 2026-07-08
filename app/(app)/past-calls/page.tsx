@@ -14,7 +14,16 @@ const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {
 export default function PastCallsPage() {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const call = calls.find((c) => c.id === selected);
+
+  async function deleteCall(id: string) {
+    setDeleting(id);
+    await fetch(`/api/calls/${id}`, { method: 'DELETE' });
+    setCalls((prev) => prev.filter((c) => c.id !== id));
+    if (selected === id) setSelected(null);
+    setDeleting(null);
+  }
 
   useEffect(() => {
     fetch('/api/calls')
@@ -37,31 +46,43 @@ export default function PastCallsPage() {
         {calls.map((c) => {
           const oc = OUTCOME_LABELS[c.outcome];
           return (
-            <button
-              key={c.id}
-              onClick={() => setSelected(c.id)}
-              className={`w-full text-left p-4 rounded-2xl border transition-all ${
-                selected === c.id
-                  ? 'border-[rgba(212,175,55,0.4)] bg-[rgba(212,175,55,0.06)]'
-                  : 'border-white/6 bg-white/3 hover:bg-white/6'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-200">{c.contactName}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {c.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {formatDuration(c.duration)}
-                  </p>
+            <div key={c.id} className="relative group">
+              <button
+                onClick={() => setSelected(c.id)}
+                className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                  selected === c.id
+                    ? 'border-[rgba(212,175,55,0.4)] bg-[rgba(212,175,55,0.06)]'
+                    : 'border-white/6 bg-white/3 hover:bg-white/6'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">{c.contactName}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {c.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {formatDuration(c.duration)}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-lg font-extrabold" style={{ color: scoreColor(c.score) }}>{c.score}</p>
+                    <p className="text-[9px] text-slate-600">score</p>
+                  </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-lg font-extrabold" style={{ color: scoreColor(c.score) }}>{c.score}</p>
-                  <p className="text-[9px] text-slate-600">score</p>
-                </div>
-              </div>
-              <span className={`inline-flex mt-2 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${oc.cls}`}>
-                {oc.label}
-              </span>
-            </button>
+                <span className={`inline-flex mt-2 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${oc.cls}`}>
+                  {oc.label}
+                </span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteCall(c.id); }}
+                disabled={deleting === c.id}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/25 text-red-400 border border-red-500/20"
+                title="Delete call"
+              >
+                {deleting === c.id
+                  ? <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" /></svg>
+                  : <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                }
+              </button>
+            </div>
           );
         })}
       </div>
