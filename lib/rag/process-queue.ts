@@ -4,7 +4,7 @@ import { chunkText, estimateTokens } from './chunk';
 import { embedTexts } from './embed';
 import { logPipelineEvent } from '@/lib/monitoring/log';
 
-const BATCH_SIZE = 5;
+const BATCH_SIZE = 20;
 
 /**
  * Drains pending embedding_queue rows: chunk → embed → store → mark ready.

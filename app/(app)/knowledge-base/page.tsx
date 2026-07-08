@@ -189,6 +189,8 @@ function UploadModal({ onClose, onUploaded }: { onClose: () => void; onUploaded:
         return;
       }
     }
+    // Drain the embedding queue so documents move from Processing → Ready
+    fetch('/api/knowledge/process-queue', { method: 'POST' }).catch(() => {});
     onUploaded();
     onClose();
   };
@@ -391,6 +393,14 @@ function DocCard({ doc, stats, onRefresh }: { doc: KnowledgeDoc; stats?: DocStat
     onRefresh();
   };
 
+  const handleRetry = async () => {
+    setBusy(true);
+    await fetch(`/api/knowledge/retry/${doc.id}`, { method: 'POST' });
+    await fetch('/api/knowledge/process-queue', { method: 'POST' });
+    setBusy(false);
+    onRefresh();
+  };
+
   const handleDownload = async () => {
     if (!doc.mimeType || doc.sourceType === 'url_import') return;
     const res = await fetch(`/api/knowledge/documents/${doc.id}`);
@@ -495,6 +505,15 @@ function DocCard({ doc, stats, onRefresh }: { doc: KnowledgeDoc; stats?: DocStat
                 </svg>
                 {doc.archived ? 'Unarchive' : 'Archive'}
               </button>
+              {(doc.status === 'failed' || doc.status === 'processing') && (
+                <button onClick={() => { setMenuOpen(false); handleRetry(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
+                  </svg>
+                  Retry Processing
+                </button>
+              )}
               <div className="my-1 border-t border-white/6" />
               <button onClick={() => { setMenuOpen(false); handleDelete(); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
@@ -521,6 +540,7 @@ function LibraryTab() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   const fetchDocs = useCallback(async () => {
     setLoading(true);
@@ -542,6 +562,18 @@ function LibraryTab() {
   }, []);
 
   useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  const processAll = async () => {
+    setProcessing(true);
+    // Call up to 3 times to drain batches of 20 each
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch('/api/knowledge/process-queue', { method: 'POST' });
+      const j = await res.json().catch(() => ({}));
+      if ((j.remaining ?? 0) === 0) break;
+    }
+    await fetchDocs();
+    setProcessing(false);
+  };
 
   const filtered = docs.filter((d) => {
     if (!showArchived && d.archived) return false;
@@ -578,6 +610,17 @@ function LibraryTab() {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="w-3.5 h-3.5 rounded" />
           Show archived
         </label>
+
+        {docs.some((d) => d.status === 'processing' || d.status === 'failed') && (
+          <button onClick={() => void processAll()} disabled={processing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50">
+            {processing
+              ? <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+              : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+            }
+            {processing ? 'Processing…' : 'Process All Pending'}
+          </button>
+        )}
 
         <button onClick={() => setShowUpload(true)}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors">
