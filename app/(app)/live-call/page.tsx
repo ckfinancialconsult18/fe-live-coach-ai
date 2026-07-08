@@ -22,6 +22,7 @@ import { useDeepgramTranscription } from '@/hooks/useDeepgramTranscription';
 import { useAICoach } from '@/hooks/useAICoach';
 import { useCallAutosave } from '@/hooks/useCallAutosave';
 import { SubscriptionGate } from '@/components/billing/SubscriptionGate';
+import { useLiveCallBridge } from '@/lib/live-call-bridge';
 import type { CallMetrics, TimelineEvent, TimelineEventCategory, PostCallReport as PostCallReportType } from '@/lib/types';
 import { scoreColor } from '@/lib/score-color';
 
@@ -291,6 +292,7 @@ function LiveCallPageInner() {
   }), [transcript, underwriting, metrics, duration, insight, memory, timeline, stage]);
 
   const autosave = useCallAutosave(getAutosavePayload);
+  const bridge = useLiveCallBridge();
 
   const startCall = useCallback(async () => {
     // Bug 2 fix: clear any existing timer before creating a new one.
@@ -321,10 +323,13 @@ function LiveCallPageInner() {
     callStartRef.current = Date.now();
     setCallStartMs(callStartRef.current);
     timerRef.current = setInterval(() => {
-      setDuration(Math.floor((Date.now() - callStartRef.current) / 1000));
+      const d = Math.floor((Date.now() - callStartRef.current) / 1000);
+      setDuration(d);
+      window.dispatchEvent(new CustomEvent('live-call-state', { detail: { live: true, duration: d } }));
     }, 1000);
     timelineEventId = 0;
     setTimeline([{ id: 'tl-greeting', timestampSec: 0, category: 'greeting', label: 'Call started', transcriptLineId: null }]);
+    window.dispatchEvent(new CustomEvent('live-call-state', { detail: { live: true, duration: 0 } }));
   }, [mic, startListening, clearTranscript, autosave]);
 
   const endCall = useCallback(async () => {
@@ -354,6 +359,7 @@ function LiveCallPageInner() {
 
     try { if (timerRef.current) clearInterval(timerRef.current); }
     catch (e) { console.error('[endCall] clearInterval threw:', e); }
+    window.dispatchEvent(new CustomEvent('live-call-state', { detail: { live: false, duration: 0 } }));
 
     try { autosave.stopCall(); console.log('[endCall] autosave.stopCall OK'); }
     catch (e) { console.error('[endCall] autosave.stopCall threw:', e); }
@@ -446,6 +452,9 @@ function LiveCallPageInner() {
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
+
+  // Register start/end handlers into TopNav bridge
+  useEffect(() => bridge.register({ startCall, endCall }), [bridge, startCall, endCall]);
 
   const talkPct = Math.round(metrics.talkPct);
   const listenPct = 100 - talkPct;
@@ -592,9 +601,6 @@ function LiveCallPageInner() {
         objectionCount={metrics.objectionCount}
         callQuality={Math.round(metrics.callQuality)}
         avgResponseTime={metrics.avgResponseTime}
-        isLive={isListening}
-        onStartCall={startCall}
-        onEndCall={endCall}
       />
 
       {/* Performance Debug Panel — Ctrl+Shift+D to toggle */}

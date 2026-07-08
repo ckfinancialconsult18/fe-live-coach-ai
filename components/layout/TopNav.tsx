@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
+import { useLiveCallBridge } from '@/lib/live-call-bridge';
 
 const breadcrumbMap: Record<string, string> = {
   '/dashboard':      'Dashboard',
@@ -18,15 +19,14 @@ const breadcrumbMap: Record<string, string> = {
 
 interface TopNavProps {
   onMenuToggle?: () => void;
-  isLive?: boolean;
-  callDuration?: number;
-  onEndCall?: () => void;
-  micActive?: boolean;
 }
 
-export function TopNav({ onMenuToggle, isLive, callDuration, onEndCall, micActive }: TopNavProps) {
+export function TopNav({ onMenuToggle }: TopNavProps) {
   const pathname = usePathname();
   const [time, setTime] = useState('');
+  const [isLive, setIsLive] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const bridge = useLiveCallBridge();
 
   useEffect(() => {
     function tick() {
@@ -35,6 +35,17 @@ export function TopNav({ onMenuToggle, isLive, callDuration, onEndCall, micActiv
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
+  }, []);
+
+  // Track live state + duration via custom events dispatched by live-call page
+  useEffect(() => {
+    function onLiveChange(e: Event) {
+      const { live, duration: d } = (e as CustomEvent).detail;
+      setIsLive(live);
+      setDuration(d ?? 0);
+    }
+    window.addEventListener('live-call-state', onLiveChange);
+    return () => window.removeEventListener('live-call-state', onLiveChange);
   }, []);
 
   const title = breadcrumbMap[pathname] ?? breadcrumbMap[`/${pathname.split('/')[1]}`] ?? 'FE Live Coach AI';
@@ -57,9 +68,7 @@ export function TopNav({ onMenuToggle, isLive, callDuration, onEndCall, micActiv
             <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
         </button>
-        <div>
-          <h1 className="text-sm font-semibold text-slate-100">{title}</h1>
-        </div>
+        <h1 className="text-sm font-semibold text-slate-100">{title}</h1>
       </div>
 
       <div className="flex items-center gap-2">
@@ -71,49 +80,47 @@ export function TopNav({ onMenuToggle, isLive, callDuration, onEndCall, micActiv
           <span className="text-xs font-mono text-slate-300">{time}</span>
         </div>
 
-        {/* Live badge */}
-        {onLivePage && (
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${
-            isLive
-              ? 'bg-green-500/10 border-green-500/30 text-green-400'
-              : 'bg-white/4 border-white/8 text-slate-500'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400 animate-live' : 'bg-slate-600'}`} />
-            {isLive ? `LIVE · ${fmtDur(callDuration ?? 0)}` : 'STANDBY'}
-          </div>
-        )}
-
-        {/* Mic status */}
-        {onLivePage && (
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${
-            micActive
-              ? 'bg-[rgba(212,175,55,0.08)] border-[rgba(212,175,55,0.25)] text-[#D4AF37]'
-              : 'bg-white/4 border-white/8 text-slate-500'
-          }`}>
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            </svg>
-            {micActive ? 'MIC ON' : 'MIC OFF'}
-          </div>
-        )}
-
-        {/* End call */}
-        {onLivePage && isLive && (
+        {/* Start / End Call — only on live-call page */}
+        {onLivePage && !isLive && (
           <button
-            onClick={onEndCall}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-colors"
+            onClick={() => bridge.startCall()}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all hover:scale-105 active:scale-100"
+            style={{
+              background: 'linear-gradient(135deg, #D4AF37, #9a7a0a)',
+              boxShadow: '0 4px 16px rgba(212,175,55,0.35)',
+              color: '#090d18',
+            }}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.79a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7a2 2 0 0 1 1.72 2z"/>
             </svg>
-            End Call
+            Start Call
           </button>
         )}
 
+        {onLivePage && isLive && (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-live" />
+              <span className="text-xs font-semibold text-green-400">LIVE · {fmtDur(duration)}</span>
+            </div>
+            <button
+              onClick={() => bridge.endCall()}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" style={{ transform: 'rotate(135deg)' }}>
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.79a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7a2 2 0 0 1 1.72 2z"/>
+              </svg>
+              End Call
+            </button>
+          </div>
+        )}
+
         {/* User avatar */}
-        <div className="w-8 h-8 rounded-full flex items-center justify-center text-[#090d18] text-xs font-extrabold cursor-pointer ml-1"
-          style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-[#090d18] text-xs font-extrabold cursor-pointer ml-1"
+          style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}
+        >
           CK
         </div>
       </div>
