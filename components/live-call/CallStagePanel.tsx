@@ -3,12 +3,81 @@
 import type { CallStage, ChecklistItem, NextBestAction } from '@/lib/types';
 
 const STAGES: { key: CallStage; label: string; icon: string; required: string[] }[] = [
-  { key: 'introduction', label: 'Open',      icon: '👋', required: ['Introduce yourself and company', 'Confirm who you are speaking with', 'Build rapport and set a friendly tone'] },
-  { key: 'permission',   label: 'Reason',    icon: '🎯', required: ['Explain why you are calling', 'Reference their inquiry or lead source', 'Get verbal confirmation they are still interested'] },
-  { key: 'discovery',    label: 'Situation', icon: '🔍', required: ['Find out who they want to protect', 'Ask about existing coverage', 'Uncover beneficiary and family situation', 'Establish the need and urgency'] },
-  { key: 'health',       label: 'Health',    icon: '❤️', required: ['Age and date of birth', 'Tobacco use in last 12 months', 'Major conditions (diabetes, cancer, COPD, CHF, stroke, kidney)', 'Current medications', 'Height and weight'] },
-  { key: 'budget',       label: 'Process',   icon: '📋', required: ['Explain how the process works', 'Present benefit amount matched to budget', 'Name the carrier and plan type', 'Handle any objections', 'Confirm monthly budget comfort'] },
-  { key: 'close',        label: 'Close',     icon: '✅', required: ['Ask for the business directly', 'Collect application information', 'Confirm payment details', 'Set expectations for next steps'] },
+  {
+    key: 'introduction',
+    label: 'Open',
+    icon: '👋',
+    required: [
+      'Say their name — no pause, no question mark',
+      '"Hey, it\'s [Name] getting back to you. How are you today?"',
+      'Drop 1-2 pieces of info you know about them — "Is that you?"',
+      '"I\'m the guy they put in charge of getting you all the info. Is that okay?"',
+    ],
+  },
+  {
+    key: 'permission',
+    label: 'Reason',
+    icon: '🎯',
+    required: [
+      '"Did something happen in life to trigger you looking now?"',
+      '"Do you have anything in place currently, or nothing at all?"',
+      'If nothing: "Is it health reasons, or just haven\'t got around to it?"',
+      'If has some: "Did you get it recently, or have you had it a while?"',
+      '"Who\'s in charge if you drop dead — who\'s picking up the pieces?"',
+    ],
+  },
+  {
+    key: 'discovery',
+    label: 'Situation',
+    icon: '🔍',
+    required: [
+      '"So if you were to drop dead this afternoon — who\'s in charge?"',
+      '"Are you looking for cremation or burial? Any extra money to leave behind?"',
+      'If has coverage: "Who is it through? Whole life, term, or accidental?"',
+      '"How much coverage is it supposed to be? Read me what it says there."',
+      '"What are you paying for that each month?"',
+      '"Do you know if there is a waiting period on it?"',
+      '"When you reached out — add coverage, better deal, or both?"',
+    ],
+  },
+  {
+    key: 'health',
+    label: 'Health',
+    icon: '❤️',
+    required: [
+      '"Tell me a little bit about what you got going on health-wise. Anything major?"',
+      '"What other things are you taking prescriptions for?"',
+      '"So just the one pill a day? That\'s it?" — reconfirm if only 1-2 things',
+      '"No history of heart issues, cancer, diabetes, kidney stuff?"',
+      '"Are you a smoker or no?"',
+      'Flag: Dialysis, Oxygen, active Cancer, Alzheimer\'s = GI only',
+    ],
+  },
+  {
+    key: 'budget',
+    label: 'Process',
+    icon: '📋',
+    required: [
+      '"I\'m gonna run a quick medical background check — find what we can actually get you approved for."',
+      '"All your medical stuff is tracked by name, address, DOB, and social."',
+      '"Once I know who will cover you, I can shop around and find the best deal."',
+      '"Can you verify your social for me?"',
+      '"I\'m gonna send you a text from the company — read me back that code."',
+    ],
+  },
+  {
+    key: 'close',
+    label: 'Close',
+    icon: '✅',
+    required: [
+      '"Alright, good news — we got you approved. Let me explain how this plan works."',
+      'Show max first: "They\'ve approved you up to $X — I\'m not suggesting you get this amount."',
+      'Present 3 options and let them pick',
+      '"Do you prefer this to come out of checking or savings?"',
+      '"First payment usually comes out in 2-3 days, or we can line it up with your Social Security date."',
+      '"I\'m going to send all of this to you by text and email. Any questions at all for me?"',
+    ],
+  },
 ];
 
 interface Props {
