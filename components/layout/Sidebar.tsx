@@ -26,7 +26,6 @@ const navItems = [
   { href: '/learn-from-call',    label: 'Learn From Call',  icon: LearnIcon },
   { href: '/knowledge-center',   label: 'Knowledge Center', icon: KnowledgeCenterIcon },
   { href: '/knowledge-base',     label: 'Knowledge Base',   icon: BookIcon },
-  { href: '/settings',        label: 'Settings',       icon: SettingsIcon },
 ];
 
 interface SidebarProps {
