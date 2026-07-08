@@ -9,6 +9,39 @@ import { checkRateLimit, coachLimiter, interimCoachLimiter } from '@/lib/rate-li
 
 const VALID_STAGES = ['introduction', 'permission', 'discovery', 'health', 'budget', 'close'];
 
+// Build a concise system-level directive from the user's saved AI preferences.
+function buildPreferencesDirective(prefs: Record<string, unknown>): string {
+  const lines: string[] = [];
+
+  const style = prefs.coaching_style as string | undefined;
+  if (style === 'supportive') {
+    lines.push('COACHING STYLE: Be encouraging and positive. Lead with what the agent did well before offering improvements. Use warm, affirming language.');
+  } else if (style === 'direct') {
+    lines.push('COACHING STYLE: Be direct and concise. Skip praise — give the most actionable correction or next move immediately. No sugarcoating.');
+  } else {
+    lines.push('COACHING STYLE: Balanced — briefly acknowledge what\'s working, then give one clear improvement or next move.');
+  }
+
+  const detail = prefs.response_detail as string | undefined;
+  if (detail === 'detailed') {
+    lines.push('RESPONSE DETAIL: Provide full explanations in "recommendedResponse", "whyThisWorks", and "nextBestQuestion" — include the reasoning, not just the script line.');
+  } else {
+    lines.push('RESPONSE DETAIL: Keep "recommendedResponse" and "nextBestQuestion" to 1–2 sentences each. Be tight.');
+  }
+
+  const focuses: string[] = [];
+  if (prefs.focus_objections)       focuses.push('objection handling');
+  if (prefs.focus_closing)          focuses.push('closing techniques');
+  if (prefs.focus_rapport)          focuses.push('rapport building');
+  if (prefs.focus_needs_assessment) focuses.push('needs assessment');
+  if (prefs.focus_product_knowledge) focuses.push('product and carrier knowledge');
+  if (focuses.length) {
+    lines.push(`FOCUS AREAS: Prioritize coaching around ${focuses.join(', ')}. When multiple observations are possible, surface the one most relevant to these areas.`);
+  }
+
+  return lines.join('\n');
+}
+
 // Fast keyword-based stage inference used to enrich the RAG query before the
 // gpt-4o-mini stage detection resolves. Keeps script chunks stage-relevant.
 function inferStageKeywords(transcript: string): string {
@@ -138,6 +171,15 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Confirmed mode: full analysis with RAG + side calls + gpt-4.1 ──────────
+  // Load user's AI preferences to personalize coaching style/focus/detail
+  const { data: profileRow } = await (supabase as any)
+    .from('users')
+    .select('ai_preferences')
+    .eq('id', user.id)
+    .single();
+  const aiPrefs: Record<string, unknown> = (profileRow?.ai_preferences as Record<string, unknown>) ?? {};
+  const prefsDirective = buildPreferencesDirective(aiPrefs);
+
   const lastTurns = transcript.split('\n').slice(-6).join('\n');
   // Enrich retrieval query with inferred stage so script chunks for the right
   // stage surface even when the transcript semantics don't match script wording.
@@ -196,6 +238,9 @@ export async function POST(req: NextRequest) {
           model: coachModel,
           messages: [
             { role: 'system', content: COACH_SYSTEM_PROMPT },
+            ...(prefsDirective
+              ? [{ role: 'system' as const, content: `AGENT PREFERENCES — apply these rules to every response this session:\n${prefsDirective}` }]
+              : []),
             ...(ragContext
               ? [{ role: 'system' as const, content: `SCRIPT & KNOWLEDGE BASE — This is the agent's own script and objection-handling material for this call. This takes priority over general knowledge.\n\nFor "recommendedResponse", "nextBestQuestion", "closingScript", and "alternativeResponses": pull language DIRECTLY from this script where it applies to the current stage and situation. Quote or closely paraphrase the script lines — do not replace them with generic sales advice when a script line fits.\n\n${ragContext}` }]
               : []),
