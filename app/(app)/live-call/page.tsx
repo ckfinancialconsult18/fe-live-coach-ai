@@ -216,9 +216,9 @@ function LiveCallPageInner() {
       const stageCategory: TimelineEventCategory =
         stage === 'introduction' ? 'greeting'
         : stage === 'permission' ? 'rapport'
-        : stage === 'discovery' || stage === 'existing_coverage' ? 'discovery'
+        : stage === 'discovery' ? 'discovery'
         : stage === 'health' ? 'health_qualification'
-        : stage === 'budget' || stage === 'presentation' ? 'price_discussion'
+        : stage === 'budget' ? 'price_discussion'
         : stage === 'close' ? 'close'
         : 'discovery';
       pushTimelineEvent(stageCategory, stage.replace(/_/g, ' '));

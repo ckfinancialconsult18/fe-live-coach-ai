@@ -4,9 +4,10 @@ import { openai } from '@/lib/openai';
 import { COACH_SYSTEM_PROMPT, UNDERWRITING_EXTRACT_PROMPT, STAGE_DETECTION_PROMPT } from '@/lib/coach-prompts';
 import { requireUser } from '@/lib/api/guard';
 import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
+import { applyAdaptiveWeights, logRetrieval } from '@/lib/rag/weights';
 import { checkRateLimit, coachLimiter, interimCoachLimiter } from '@/lib/rate-limit';
 
-const VALID_STAGES = ['introduction', 'permission', 'discovery', 'existing_coverage', 'health', 'budget', 'presentation', 'objections', 'close'];
+const VALID_STAGES = ['introduction', 'permission', 'discovery', 'health', 'budget', 'close'];
 
 function buildChecklist(transcript: string): Record<string, boolean> {
   const lower = transcript.toLowerCase();
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
     memory?: Record<string, unknown>;
     lastNBA?: { actionType: string; nextQuestion: string } | null;
     isInterim?: boolean;
+    callId?: string | null;
   };
   const limiter = body.isInterim ? interimCoachLimiter : coachLimiter;
   const rl = checkRateLimit(limiter, user.id);
@@ -61,13 +63,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { transcript, fullLength: _fullLength, memory, lastNBA, isInterim } = body as {
-    transcript: string;
-    fullLength: number;
-    memory?: Record<string, unknown>;
-    lastNBA?: { actionType: string; nextQuestion: string } | null;
-    isInterim?: boolean;
-  };
+  const { transcript, fullLength: _fullLength, memory, lastNBA, isInterim, callId } = body;
   if (!transcript) return NextResponse.json({ error: 'No transcript' }, { status: 400 });
 
   const encoder = new TextEncoder();
@@ -129,8 +125,13 @@ export async function POST(req: NextRequest) {
 
   // ── Confirmed mode: full analysis with RAG + side calls + gpt-4.1 ──────────
   const lastTurns = transcript.split('\n').slice(-6).join('\n');
-  const retrievedChunks = await retrieveRelevantChunks(supabase, user.id, lastTurns, { matchCount: 4, minSimilarity: 0.45 }).catch(() => []);
-  const ragContext = formatChunksForPrompt(retrievedChunks);
+  const rawChunks = await retrieveRelevantChunks(supabase, user.id, lastTurns, { matchCount: 6, minSimilarity: 0.40 }).catch(() => []);
+  // Re-rank by adaptive weight: docs that have driven policy writes surface first
+  const retrievedChunks = await applyAdaptiveWeights(supabase, user.id, rawChunks);
+  const topChunks = retrievedChunks.slice(0, 4);
+  const ragContext = formatChunksForPrompt(topChunks);
+  // Fire-and-forget: log retrievals so post-call can credit these docs on a win
+  logRetrieval(supabase, user.id, topChunks, callId ?? null, null);
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -197,7 +198,7 @@ export async function POST(req: NextRequest) {
           stage,
           underwriting,
           checklist: buildChecklist(transcript),
-          ragSources: retrievedChunks.map((c) => ({ id: c.id, similarity: c.similarity })),
+          ragSources: topChunks.map((c) => ({ id: c.id, similarity: c.similarity, weight: (c as any).weight ?? 1 })),
         });
       } catch (err) {
         console.error('Coach API streaming error:', err);

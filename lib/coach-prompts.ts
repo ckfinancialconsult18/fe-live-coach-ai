@@ -348,16 +348,13 @@ Return JSON:
   "improvementPlan": ["action item 1", "action item 2", "action item 3"]
 }`;
 
-export const STAGE_DETECTION_PROMPT = `Based on the conversation, identify the current call stage. Return only the stage name:
-- introduction: Agent introducing themselves
-- permission: Asking if it's a good time
-- discovery: Finding out why they're interested
-- existing_coverage: Asking about current policies
-- health: Going through health questions
-- budget: Discussing monthly budget
-- presentation: Presenting the product
-- objections: Handling objections
-- close: Asking for the sale or scheduling next steps`;
+export const STAGE_DETECTION_PROMPT = `Based on the conversation, identify the current call stage. Return only the stage name, exactly as listed:
+- introduction: Agent opening the call, introducing name and company, building initial rapport
+- permission: Explaining the reason for the call, referencing their inquiry, confirming interest
+- discovery: Uncovering the prospect's situation — who they want to protect, existing coverage, beneficiary, urgency
+- health: Going through health qualification questions — age, tobacco, conditions, medications, height/weight
+- budget: Explaining the process, presenting plan options, handling objections, confirming budget
+- close: Asking for the sale, collecting application info, confirming payment, setting next steps`;
 
 export const COACHING_RECOMMENDATIONS_PROMPT = `You are a Final Expense sales manager generating personalized coaching recommendations for one specific agent, based ONLY on their own aggregated performance data over the last 30 days (provided below as JSON). Do not invent numbers, examples, or call details that are not present in the data.
 

@@ -3,15 +3,12 @@
 import type { CallStage, ChecklistItem, NextBestAction } from '@/lib/types';
 
 const STAGES: { key: CallStage; label: string; icon: string; required: string[] }[] = [
-  { key: 'introduction',      label: 'Introduction',       icon: '👋', required: ['State your name and company', 'Explain call purpose'] },
-  { key: 'permission',        label: 'Permission',         icon: '🤝', required: ['Ask if it is a good time', 'Get verbal permission to continue'] },
-  { key: 'discovery',         label: 'Discovery',          icon: '🔍', required: ['Find out why they are interested', 'Uncover who they want to protect', 'Ask about existing coverage intent'] },
-  { key: 'existing_coverage', label: 'Existing Coverage',  icon: '📋', required: ['Ask about current life insurance', 'Ask about beneficiary'] },
-  { key: 'health',            label: 'Health Questions',   icon: '❤️', required: ['Age and gender', 'Tobacco use', 'Major conditions (diabetes, cancer, COPD, CHF, stroke)', 'Current medications'] },
-  { key: 'budget',            label: 'Budget',             icon: '💰', required: ['Anchor monthly budget before pricing', 'Confirm budget comfort'] },
-  { key: 'presentation',      label: 'Presentation',       icon: '📊', required: ['Present benefit amount matched to budget', 'Explain guaranteed acceptance / underwriting class', 'Name the carrier'] },
-  { key: 'objections',        label: 'Objections',         icon: '🛡️', required: ['Acknowledge the objection', 'Pivot with empathy', 'Ask follow-up question'] },
-  { key: 'close',             label: 'Close',              icon: '✅', required: ['Ask for the sale directly', 'Confirm application details', 'Set clear next step'] },
+  { key: 'introduction', label: 'Open',      icon: '👋', required: ['Introduce yourself and company', 'Confirm who you are speaking with', 'Build rapport and set a friendly tone'] },
+  { key: 'permission',   label: 'Reason',    icon: '🎯', required: ['Explain why you are calling', 'Reference their inquiry or lead source', 'Get verbal confirmation they are still interested'] },
+  { key: 'discovery',    label: 'Situation', icon: '🔍', required: ['Find out who they want to protect', 'Ask about existing coverage', 'Uncover beneficiary and family situation', 'Establish the need and urgency'] },
+  { key: 'health',       label: 'Health',    icon: '❤️', required: ['Age and date of birth', 'Tobacco use in last 12 months', 'Major conditions (diabetes, cancer, COPD, CHF, stroke, kidney)', 'Current medications', 'Height and weight'] },
+  { key: 'budget',       label: 'Process',   icon: '📋', required: ['Explain how the process works', 'Present benefit amount matched to budget', 'Name the carrier and plan type', 'Handle any objections', 'Confirm monthly budget comfort'] },
+  { key: 'close',        label: 'Close',     icon: '✅', required: ['Ask for the business directly', 'Collect application information', 'Confirm payment details', 'Set expectations for next steps'] },
 ];
 
 interface Props {
