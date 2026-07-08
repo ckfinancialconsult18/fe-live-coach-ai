@@ -71,14 +71,61 @@ async function parseImage(buffer: Buffer, filename: string): Promise<ParsedTrans
 }
 
 async function parsePdf(buffer: Buffer): Promise<ParsedTranscript> {
+  // Step 1: try text-layer extraction via pdf-parse (fast, free, no API call)
+  let textLayerText = '';
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number }>;
     const result = await pdfParse(buffer);
-    return parsePlainText(result.text, 'pdf');
-  } catch (err) {
-    throw new Error(`PDF parsing failed: ${err instanceof Error ? err.message : 'pdf-parse unavailable'}`);
+    textLayerText = (result.text ?? '').trim();
+  } catch {
+    // pdf-parse failed — fall through to vision OCR
   }
+
+  // If we got meaningful text (> 200 chars) the PDF has a text layer — use it
+  if (textLayerText.length > 200) {
+    return parsePlainText(textLayerText, 'pdf');
+  }
+
+  // Step 2: scanned/image-based PDF — send to GPT-4o vision as a base64 file
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('PDF has no text layer and OPENAI_API_KEY is not set for vision OCR fallback.');
+  }
+  if (buffer.length > 30 * 1024 * 1024) {
+    throw new Error('PDF is too large for vision OCR (max 30 MB). Split the file into smaller sections and re-upload.');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const OpenAI = require('openai').default ?? require('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const b64 = buffer.toString('base64');
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 8192,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'This is a carrier brochure or insurance product document. Extract ALL text from every page exactly as shown — including plan names, benefit amounts, eligibility requirements, health questions, premium tables, underwriting criteria, footnotes, and any fine print. Preserve structure (headings, bullet points, tables). Return plain text only.',
+          },
+          {
+            type: 'file' as any,
+            file: {
+              filename: 'document.pdf',
+              file_data: `data:application/pdf;base64,${b64}`,
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  const text = completion.choices[0]?.message?.content ?? '';
+  if (!text.trim()) throw new Error('GPT-4o could not extract text from this PDF. The file may be corrupted or password-protected.');
+  return parsePlainText(text, 'pdf');
 }
 
 async function parseDocx(buffer: Buffer): Promise<ParsedTranscript> {
