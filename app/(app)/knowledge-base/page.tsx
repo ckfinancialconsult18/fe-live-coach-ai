@@ -414,7 +414,7 @@ function DocCard({ doc, stats, onRefresh }: { doc: KnowledgeDoc; stats?: DocStat
   const wBadge = stats ? weightLabel(stats.weight) : null;
 
   return (
-    <div className={`glass-card rounded-2xl overflow-hidden transition-opacity ${doc.archived ? 'opacity-50' : ''}`}>
+    <div className={`glass-card rounded-2xl transition-opacity ${doc.archived ? 'opacity-50' : ''}`}>
       <div className="flex items-start gap-3 p-4">
         {/* Color dot */}
         <div className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
