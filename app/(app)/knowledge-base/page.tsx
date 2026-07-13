@@ -481,7 +481,7 @@ function DocCard({ doc, stats, onRefresh }: { doc: KnowledgeDoc; stats?: DocStat
             </svg>
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-8 z-20 w-44 glass-card rounded-xl py-1 border border-white/8 shadow-xl">
+            <div className="absolute right-0 top-8 z-20 w-44 glass-card rounded-xl py-1 border border-white/8 shadow-xl overflow-y-auto max-h-64">
               {doc.mimeType && doc.sourceType !== 'url_import' && (
                 <button onClick={() => { setMenuOpen(false); handleDownload(); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/6 transition-colors">
