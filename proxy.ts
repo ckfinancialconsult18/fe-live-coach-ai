@@ -20,7 +20,7 @@ function isPaywallExempt(pathname: string) {
   return PAYWALL_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Auth session refresh (also handles unauthenticated redirects)
   const authResponse = await updateSession(request);
 
@@ -43,7 +43,7 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return authResponse; // updateSession already handles this
+  if (!user) return authResponse;
 
   // Check beta access first (bypasses Stripe entirely)
   const { data: userData } = await supabase

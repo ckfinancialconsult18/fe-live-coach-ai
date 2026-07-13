@@ -100,7 +100,7 @@ async function parsePdf(buffer: Buffer): Promise<ParsedTranscript> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   // Upload via Files API so we can reference by file_id (works for large PDFs)
-  const blob = new Blob([buffer], { type: 'application/pdf' });
+  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/pdf' });
   const formFile = new File([blob], 'document.pdf', { type: 'application/pdf' });
   const uploaded = await openai.files.create({ file: formFile, purpose: 'user_data' });
 
