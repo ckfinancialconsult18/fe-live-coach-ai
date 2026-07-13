@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ObjectionKey } from '@/lib/types';
 import { OBJECTION_RESPONSES } from '@/lib/objection-responses';
 
@@ -14,8 +14,38 @@ const BUTTONS: { key: ObjectionKey; label: string; emoji: string }[] = [
   { key: 'not_interested',   label: 'Not Interested',  emoji: '🚫' },
 ];
 
-export function QuickObjectionBar() {
+interface Props {
+  transcript?: string;
+}
+
+export function QuickObjectionBar({ transcript }: Props = {}) {
   const [active, setActive] = useState<ObjectionKey | null>(null);
+  const [kbScript, setKbScript] = useState<string | null>(null);
+  const [kbLoading, setKbLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!active) { setKbScript(null); return; }
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setKbScript(null);
+    setKbLoading(true);
+
+    fetch('/api/objection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ objectionKey: active, transcript }),
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((d: { script: string | null }) => { if (!controller.signal.aborted) setKbScript(d.script); })
+      .catch(() => {})
+      .finally(() => { if (!controller.signal.aborted) setKbLoading(false); });
+
+    return () => controller.abort();
+  }, [active, transcript]);
 
   const response = active ? OBJECTION_RESPONSES[active] : null;
 
@@ -80,6 +110,23 @@ export function QuickObjectionBar() {
               </div>
             </div>
           </div>
+
+          {/* Knowledge base script — pulled live from uploaded materials */}
+          {(kbLoading || kbScript) && (
+            <div className="mt-3 pt-3 border-t border-white/8">
+              <p className="text-[9px] font-bold uppercase tracking-wider mb-1.5" style={{ color: '#D4AF37' }}>
+                📚 From Your Scripts
+              </p>
+              {kbLoading && !kbScript ? (
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 border border-[#D4AF37]/40 border-t-[#D4AF37] rounded-full animate-spin" />
+                  <span className="text-[10px] text-slate-500">Pulling from knowledge base…</span>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-200 leading-relaxed italic whitespace-pre-line">{kbScript}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

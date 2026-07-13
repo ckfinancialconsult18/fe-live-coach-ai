@@ -592,7 +592,7 @@ function LiveCallPageInner() {
       </div>
 
       {/* Quick Objection Bar */}
-      <QuickObjectionBar />
+      <QuickObjectionBar transcript={transcript.map((l) => `${l.speaker === 'agent' ? 'AGENT' : 'PROSPECT'}: ${l.text}`).join('\n')} />
 
       {/* Bottom Metrics Bar */}
       <CallMetricsBar
