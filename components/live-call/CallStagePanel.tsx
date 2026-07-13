@@ -108,17 +108,17 @@ export function CallStagePanel({ currentStage, checklist = [], nextBestAction }:
             style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #9a7a0a, #D4AF37)' }}
           />
         </div>
-        <p className="text-[10px] text-[#D4AF37] mt-1">{Math.round(progress)}% through call</p>
+        <p className="text-xs text-[#D4AF37] mt-1">{Math.round(progress)}% through call</p>
       </div>
 
       {/* Current stage required questions */}
       {currentStageData && (
         <div className="px-4 pb-3 shrink-0 space-y-1.5 border-b border-white/6">
-          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Required — {currentStageData.label}</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Required — {currentStageData.label}</p>
           {currentStageData.required.map((q) => (
             <div key={q} className="flex items-start gap-2">
-              <span className="mt-0.5 text-[10px] text-green-400 shrink-0">○</span>
-              <span className="text-[10px] text-slate-400 leading-tight">{q}</span>
+              <span className="mt-0.5 text-xs text-green-400 shrink-0">○</span>
+              <span className="text-xs text-slate-400 leading-tight">{q}</span>
             </div>
           ))}
         </div>
@@ -127,15 +127,15 @@ export function CallStagePanel({ currentStage, checklist = [], nextBestAction }:
       {/* Checklist completion from AI */}
       {checklist.length > 0 && (
         <div className="px-4 py-2.5 shrink-0 space-y-1 border-b border-white/6">
-          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
             Checklist — {checkedIds.size}/{checklist.length} done
           </p>
           {checklist.map((item) => (
             <div key={item.id} className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold ${item.checked ? 'text-green-400' : 'text-slate-600'}`}>
+              <span className={`text-xs font-bold ${item.checked ? 'text-green-400' : 'text-slate-600'}`}>
                 {item.checked ? '✓' : '○'}
               </span>
-              <span className={`text-[10px] ${item.checked ? 'text-slate-400 line-through' : 'text-slate-400'}`}>
+              <span className={`text-xs ${item.checked ? 'text-slate-400 line-through' : 'text-slate-400'}`}>
                 {item.label}
               </span>
             </div>
@@ -146,9 +146,9 @@ export function CallStagePanel({ currentStage, checklist = [], nextBestAction }:
       {/* Next best action */}
       {nextBestAction && (
         <div className="px-4 py-2.5 shrink-0 border-b border-white/6">
-          <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: '#D4AF37' }}>Recommended Next</p>
-          <p className="text-[11px] text-slate-200 leading-snug">{nextBestAction.nextQuestion || nextBestAction.nextResponse}</p>
-          <span className="inline-block mt-1 text-[9px] px-1.5 py-0.5 rounded-full font-semibold bg-[rgba(212,175,55,0.12)] border border-[rgba(212,175,55,0.25)]" style={{ color: '#D4AF37' }}>
+          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: '#D4AF37' }}>Recommended Next</p>
+          <p className="text-sm text-slate-200 leading-snug">{nextBestAction.nextQuestion || nextBestAction.nextResponse}</p>
+          <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-[rgba(212,175,55,0.12)] border border-[rgba(212,175,55,0.25)]" style={{ color: '#D4AF37' }}>
             {nextBestAction.actionType?.replace(/_/g, ' ')}
           </span>
         </div>
@@ -182,7 +182,7 @@ export function CallStagePanel({ currentStage, checklist = [], nextBestAction }:
                 {stage.label}
               </span>
               {isActive && (
-                <span className="flex items-center gap-1 text-[9px] font-bold text-[#D4AF37]">
+                <span className="flex items-center gap-1 text-[10px] font-bold text-[#D4AF37]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-live" />
                   NOW
                 </span>
