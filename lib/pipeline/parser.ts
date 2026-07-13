@@ -99,31 +99,38 @@ async function parsePdf(buffer: Buffer): Promise<ParsedTranscript> {
   const OpenAI = require('openai').default ?? require('openai');
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const b64 = buffer.toString('base64');
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 8192,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: 'This is a carrier brochure or insurance product document. Extract ALL text from every page exactly as shown — including plan names, benefit amounts, eligibility requirements, health questions, premium tables, underwriting criteria, footnotes, and any fine print. Preserve structure (headings, bullet points, tables). Return plain text only.',
-          },
-          {
-            type: 'file' as any,
-            file: {
-              filename: 'document.pdf',
-              file_data: `data:application/pdf;base64,${b64}`,
-            },
-          },
-        ],
-      },
-    ],
-  });
+  // Upload via Files API so we can reference by file_id (works for large PDFs)
+  const blob = new Blob([buffer], { type: 'application/pdf' });
+  const formFile = new File([blob], 'document.pdf', { type: 'application/pdf' });
+  const uploaded = await openai.files.create({ file: formFile, purpose: 'user_data' });
 
-  const text = completion.choices[0]?.message?.content ?? '';
+  let text = '';
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'This is a carrier brochure or insurance product document. Extract ALL text from every page exactly as shown — including plan names, benefit amounts, eligibility requirements, health questions, premium tables, underwriting criteria, footnotes, and any fine print. Preserve structure (headings, bullet points, tables). Return plain text only.',
+            },
+            {
+              type: 'file' as any,
+              file: { file_id: uploaded.id },
+            },
+          ],
+        },
+      ],
+    });
+    text = completion.choices[0]?.message?.content ?? '';
+  } finally {
+    // Clean up the uploaded file regardless of success/failure
+    await openai.files.del(uploaded.id).catch(() => {});
+  }
+
   if (!text.trim()) throw new Error('GPT-4o could not extract text from this PDF. The file may be corrupted or password-protected.');
   return parsePlainText(text, 'pdf');
 }
