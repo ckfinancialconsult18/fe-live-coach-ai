@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { openai } from '@/lib/openai';
 import { COACH_SYSTEM_PROMPT, UNDERWRITING_EXTRACT_PROMPT, STAGE_DETECTION_PROMPT } from '@/lib/coach-prompts';
 import { requireUser } from '@/lib/api/guard';
-import { retrieveRelevantChunks, formatChunksForPrompt } from '@/lib/rag/retrieve';
+import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
 import { applyAdaptiveWeights, logRetrieval } from '@/lib/rag/weights';
 import { checkRateLimit, coachLimiter, interimCoachLimiter } from '@/lib/rate-limit';
 
@@ -203,6 +203,9 @@ export async function POST(req: NextRequest) {
   const ragContext = formatChunksForPrompt(topChunks);
   // Fire-and-forget: log retrievals so post-call can credit these docs on a win
   logRetrieval(supabase, user.id, topChunks, callId ?? null, null);
+  // Resolve chunk → document titles concurrently with the coach stream so the
+  // meta frame can attribute which knowledge base sources informed this advice.
+  const sourcesPromise = getChunkSources(supabase, topChunks).catch(() => []);
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -267,12 +270,22 @@ export async function POST(req: NextRequest) {
         try { underwriting = JSON.parse(underwritingText); } catch { /* keep empty */ }
         const stage = VALID_STAGES.includes(stageText) ? stageText : 'introduction';
 
+        const resolvedSources = await sourcesPromise;
         send({
           t: 'meta',
           stage,
           underwriting,
           checklist: buildChecklist(transcript),
-          ragSources: topChunks.map((c) => ({ id: c.id, similarity: c.similarity, weight: (c as any).weight ?? 1 })),
+          ragSources: topChunks.map((c) => {
+            const src = resolvedSources.find((s) => s.chunkId === c.id);
+            return {
+              id: c.id,
+              similarity: c.similarity,
+              weight: (c as any).weight ?? 1,
+              title: src?.title ?? null,
+              sourceType: src?.sourceType ?? null,
+            };
+          }),
         });
       } catch (err) {
         console.error('Coach API streaming error:', err);

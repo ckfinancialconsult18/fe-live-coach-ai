@@ -351,7 +351,7 @@ export default function RolePlayPage() {
 
 function RolePlayPageInner() {
   const { session, phase, isProspectTyping, transcript, startSession, sendAgentMessage, endSession, resetSession, durationSeconds } = useRolePlay();
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, liveScores, missedOpportunities, liveObjectionState, liveClosingState } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, liveScores, missedOpportunities, liveObjectionState, liveClosingState, ragSources } = useAICoach(transcript);
 
   const [input, setInput] = useState('');
   const [coachTab, setCoachTab] = useState<CoachTab>('score');
@@ -649,7 +649,7 @@ function RolePlayPageInner() {
         <div className="flex-1 overflow-hidden">
           {coachTab === 'coach' && (
             <div className="h-full overflow-y-auto">
-              <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} />
+              <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} ragSources={ragSources} />
             </div>
           )}
           {coachTab === 'score' && (

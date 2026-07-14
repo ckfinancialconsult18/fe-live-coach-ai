@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { LiveTranscript } from '@/components/live-call/LiveTranscript';
 import { AICoachPanel } from '@/components/live-call/AICoachPanel';
+import { ScriptFollowPanel } from '@/components/live-call/ScriptFollowPanel';
 import { CallStagePanel } from '@/components/live-call/CallStagePanel';
 import { MetricsPanel } from '@/components/live-call/MetricsPanel';
 import { LiveCarrierPanel } from '@/components/live-call/LiveCarrierPanel';
@@ -76,9 +77,21 @@ function LiveCallPageInner() {
     startListening, stopListening, clearTranscript, correctSpeaker,
     silenceWarning, audioWarning, recorderIntervalMs,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis, ragSources } = useAICoach(transcript);
 
   const [duration, setDuration] = useState(0);
+  // Center panel view: unified script-follow (default) or classic AI coach.
+  // Read from localStorage after mount to avoid a hydration mismatch.
+  const [centerView, setCenterView] = useState<'script' | 'coach'>('script');
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('livecall:centerView') === 'coach') setCenterView('coach');
+    } catch { /* ignore */ }
+  }, []);
+  const switchCenterView = useCallback((v: 'script' | 'coach') => {
+    setCenterView(v);
+    try { localStorage.setItem('livecall:centerView', v); } catch { /* ignore */ }
+  }, []);
   const [showPostCall, setShowPostCall] = useState(false);
   const [postCallReport, setPostCallReport] = useState<PostCallReportType | null>(null);
   const [postCallError, setPostCallError] = useState<string | null>(null);
@@ -512,9 +525,37 @@ function LiveCallPageInner() {
           <LiveTranscript lines={transcript} partial={partial} isListening={isListening} onCorrectSpeaker={correctSpeaker} />
         </div>
 
-        {/* CENTER — AI Coach (32%) */}
-        <div className="flex flex-col w-[32%] min-w-0 overflow-y-auto">
-          <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} isInterimCoaching={isInterimCoaching} />
+        {/* CENTER — Script Follow / AI Coach (32%) */}
+        <div className="flex flex-col w-[32%] min-w-0">
+          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/6 shrink-0">
+            {(['script', 'coach'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchCenterView(v)}
+                className={`flex-1 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                  centerView === v
+                    ? 'bg-[rgba(212,175,55,0.12)] text-[#D4AF37] border border-[rgba(212,175,55,0.3)]'
+                    : 'text-slate-600 hover:text-slate-400 border border-transparent'
+                }`}
+              >
+                {v === 'script' ? '🎯 Script Follow' : '🤖 Classic Coach'}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {centerView === 'script' ? (
+              <ScriptFollowPanel
+                stage={stage}
+                insight={insight}
+                checklist={checklist}
+                isAnalyzing={isAnalyzing}
+                isInterimCoaching={isInterimCoaching}
+                ragSources={ragSources}
+              />
+            ) : (
+              <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} isInterimCoaching={isInterimCoaching} ragSources={ragSources} />
+            )}
+          </div>
         </div>
 
         {/* RIGHT — Stage / Metrics / Underwriting / Memory (33%) */}

@@ -60,6 +60,14 @@ const DEFAULT_UNDERWRITING: UnderwritingProfile = {
   heartAttack: null, dialysis: null, dui: null, felony: null, bankruptcy: null, veteran: null,
 };
 
+export type CoachRagSource = {
+  id: string;
+  similarity: number;
+  weight: number;
+  title: string | null;
+  sourceType: string | null;
+};
+
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
   { id: 'beneficiary',      label: 'Asked beneficiary',       checked: false },
   { id: 'reason',           label: 'Asked reason for request', checked: false },
@@ -83,6 +91,7 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [probabilityHistory, setProbabilityHistory] = useState<ProbabilitySnapshot[]>([]);
 
   const [isInterimCoaching, setIsInterimCoaching] = useState(false);
+  const [ragSources, setRagSources] = useState<CoachRagSource[]>([]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -241,8 +250,11 @@ export function useAICoach(transcript: TranscriptLine[]) {
     requestAnimationFrame(() => emitPerf('coach-render', Math.round(performance.now() - renderT0)));
   }, []);
 
-  const applyMeta = useCallback((meta: { stage?: CallStage; underwriting?: Record<string, unknown>; checklist?: Record<string, boolean> }) => {
+  const applyMeta = useCallback((meta: { stage?: CallStage; underwriting?: Record<string, unknown>; checklist?: Record<string, boolean>; ragSources?: CoachRagSource[] }) => {
     if (meta.stage) setStage(meta.stage);
+    // Update knowledge base attribution on every confirmed analysis — an empty
+    // array means this turn's advice used no KB material, so clear the display.
+    if (Array.isArray(meta.ragSources)) setRagSources(meta.ragSources);
     if (meta.underwriting) {
       setUnderwriting((prev) => {
         const next = { ...prev };
@@ -450,5 +462,6 @@ export function useAICoach(transcript: TranscriptLine[]) {
     insight, stage, underwriting, carriers, checklist, isAnalyzing, isInterimCoaching,
     scheduleAnalysis, scheduleInterimAnalysis, setStage, memory,
     liveScores, missedOpportunities, liveObjectionState, liveClosingState,
+    ragSources,
   };
 }

@@ -3,6 +3,7 @@ import { openai } from '@/lib/openai';
 import { POST_CALL_PROMPT } from '@/lib/coach-prompts';
 import { createClient } from '@/lib/supabase/server';
 import { retrieveRelevantChunks, formatChunksForPrompt, getChunkSources } from '@/lib/rag/retrieve';
+import { recordPositiveOutcome } from '@/lib/rag/weights';
 import { createRateLimiter, checkRateLimit } from '@/lib/rate-limit';
 import {
   SCORE_WEIGHTS,
@@ -436,6 +437,12 @@ export async function POST(req: NextRequest) {
     '| _scoreError:', report._scoreError ?? 'none');
 
   if (ragSources.length) report.ragSources = ragSources;
+
+  // Adaptive weights: high-scoring calls (≥80) credit the knowledge sources
+  // retrieved during live coaching so they rank higher on future calls.
+  if (persistedCallId && report.overallScore >= 80) {
+    recordPositiveOutcome(supabase, user.id, persistedCallId).catch(() => {});
+  }
 
   return NextResponse.json(report);
 }

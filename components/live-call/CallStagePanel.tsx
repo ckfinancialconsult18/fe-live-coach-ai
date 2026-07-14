@@ -2,7 +2,7 @@
 
 import type { CallStage, ChecklistItem, NextBestAction } from '@/lib/types';
 
-const STAGES: { key: CallStage; label: string; icon: string; required: string[] }[] = [
+export const STAGES: { key: CallStage; label: string; icon: string; required: string[] }[] = [
   {
     key: 'introduction',
     label: 'Open',

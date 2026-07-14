@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { CoachInsight } from '@/lib/types';
+import type { CoachRagSource } from '@/hooks/useAICoach';
 import { ObjectionEnginePanel } from './ObjectionEnginePanel';
 import { BuyingSignalEnginePanel } from './BuyingSignalEnginePanel';
 import { NextBestActionPanel } from './NextBestActionPanel';
@@ -13,11 +14,16 @@ interface Props {
    *  Content dims to gray and shows a "live" indicator; transitions to gold when
    *  the confirmed Deepgram transcript lands and analysis completes. */
   isInterimCoaching?: boolean;
+  /** Knowledge base sources the current advice drew from (confirmed analysis only). */
+  ragSources?: CoachRagSource[];
 }
 
 const OBJECTION_CONFIDENCE_THRESHOLD = 55;
 
-export function AICoachPanel({ insight, isAnalyzing, isInterimCoaching = false }: Props) {
+export function AICoachPanel({ insight, isAnalyzing, isInterimCoaching = false, ragSources = [] }: Props) {
+  // Dedupe by document title — several chunks often come from the same doc
+  const namedSources = ragSources.filter((s) => s.title);
+  const sourceDocs = [...new Map(namedSources.map((s) => [s.title, s])).values()];
   // Filter out low-confidence objections to avoid false positives
   const activeObjection = insight.objectionAnalysis && insight.objectionAnalysis.confidence >= OBJECTION_CONFIDENCE_THRESHOLD
     ? insight.objectionAnalysis
@@ -226,6 +232,26 @@ export function AICoachPanel({ insight, isAnalyzing, isInterimCoaching = false }
                   <span className="text-[10px] mt-0.5">💛</span>
                   <p className="text-xs text-slate-300">{e}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Knowledge base attribution — which uploaded docs informed this advice */}
+        {sourceDocs.length > 0 && (
+          <div className="rounded-xl p-3 space-y-2 border border-white/6 bg-white/[0.02]">
+            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">📚 Knowledge Base Sources</p>
+            <div className="flex flex-wrap gap-1.5">
+              {sourceDocs.map((s) => (
+                <span
+                  key={s.id}
+                  title={`${Math.round(s.similarity * 100)}% relevant to this moment in the call`}
+                  className="inline-flex items-center gap-1 max-w-full rounded-full px-2 py-0.5 text-[10px] border"
+                  style={{ background: 'rgba(212,175,55,0.06)', borderColor: 'rgba(212,175,55,0.2)', color: '#c9b26a' }}
+                >
+                  <span className="truncate max-w-[160px]">{s.title}</span>
+                  <span className="text-slate-500 shrink-0">{Math.round(s.similarity * 100)}%</span>
+                </span>
               ))}
             </div>
           </div>
