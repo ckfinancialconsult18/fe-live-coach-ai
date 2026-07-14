@@ -16,6 +16,15 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time.
+# Railway passes service variables as Docker build args, but only if the
+# Dockerfile declares them — without these, the browser Supabase client is
+# built with undefined credentials and throws on first use (Start Call).
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 # Build the Next.js application (output: standalone)
 RUN npm run build
 
