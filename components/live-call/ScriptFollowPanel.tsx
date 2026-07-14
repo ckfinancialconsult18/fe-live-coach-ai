@@ -49,7 +49,8 @@ export function ScriptFollowPanel({
   const currentIdx = STAGES.findIndex((s) => s.key === stage);
   const currentStage = STAGES[currentIdx];
   const nextStage = STAGES[currentIdx + 1];
-  const progress = ((currentIdx + 1) / STAGES.length) * 100;
+  // Progress counts *completed* stages — being in stage 1 of 6 means 0% done.
+  const progress = (currentIdx / STAGES.length) * 100;
 
   const activeObjection =
     insight.objectionAnalysis && insight.objectionAnalysis.confidence >= OBJECTION_CONFIDENCE_THRESHOLD

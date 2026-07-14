@@ -88,7 +88,8 @@ interface Props {
 
 export function CallStagePanel({ currentStage, checklist = [], nextBestAction }: Props) {
   const currentIdx = STAGES.findIndex((s) => s.key === currentStage);
-  const progress = ((currentIdx + 1) / STAGES.length) * 100;
+  // Progress counts *completed* stages — being in stage 1 of 6 means 0% done.
+  const progress = (currentIdx / STAGES.length) * 100;
   const currentStageData = STAGES[currentIdx];
 
   const checkedIds = new Set(checklist.filter((c) => c.checked).map((c) => c.id));
