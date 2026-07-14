@@ -195,6 +195,10 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const usingWebSpeechRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   useEffect(() => { streamRef.current = audioManager.stream; }, [audioManager.stream]);
+  // Raw mic stream from the last startListening call — used to distinguish a
+  // duplicate start (same stream → ignore) from a stale session left behind
+  // after a mid-session device switch (different/dead stream → restart).
+  const rawStreamRef = useRef<MediaStream | null>(null);
 
   // Level monitor
   const monitorCtxRef = useRef<AudioContext | null>(null);
@@ -622,8 +626,19 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
   const startListening = useCallback(async (explicitStream?: MediaStream) => {
     if (shouldReconnectRef.current) {
-      console.warn('[transcription] startListening called while already active — ignoring');
-      return;
+      // A session is still flagged active. Only ignore the start request if
+      // that session is genuinely alive AND no new stream is being supplied.
+      // Otherwise the flag is stale (e.g. the mic device was switched
+      // mid-session, killing the old stream) — tear it down and start fresh.
+      const prevTracks = streamRef.current?.getAudioTracks() ?? [];
+      const prevAlive = prevTracks.some((t) => t.readyState === 'live');
+      const sameStream = explicitStream ? explicitStream === rawStreamRef.current : true;
+      if (prevAlive && sameStream) {
+        console.warn('[transcription] startListening called while already active — ignoring');
+        return;
+      }
+      console.warn('[transcription] stale session detected (stream replaced or ended) — restarting');
+      stopListeningRef.current();
     }
 
     shouldReconnectRef.current = true;
@@ -647,10 +662,14 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
     const rawStream = explicitStream ?? micRef.current.stream;
     if (!rawStream) {
+      // Reset the active flag — otherwise this failed start permanently
+      // blocks every future startListening call with "already active".
+      shouldReconnectRef.current = false;
       setError('Microphone is not active — cannot start transcription.');
       setConnectionState('failed');
       return;
     }
+    rawStreamRef.current = rawStream;
 
     setConnectionState('connecting');
     setError(null);
