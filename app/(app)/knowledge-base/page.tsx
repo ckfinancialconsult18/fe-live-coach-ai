@@ -99,7 +99,7 @@ const SCRIPT_SECTIONS = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const SOURCE_LABELS: Record<string, string> = {
-  carrier_guide: 'Carrier Guide',
+  carrier_guide: 'Carrier Guide / Brochure',
   underwriting_manual: 'Underwriting Manual',
   script: 'Script',
   objection_handling: 'Objection Handling',
