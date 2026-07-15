@@ -17,7 +17,6 @@ const navItems = [
   { href: '/live-call',      label: 'Live Calls',     icon: PhoneIcon },
   { href: '/past-calls',     label: 'Past Calls',     icon: ClockIcon },
   { href: '/role-play',      label: 'Role Play',      icon: MicIcon },
-  { href: '/contacts',       label: 'Contacts',       icon: UsersIcon },
   { href: '/reports',        label: 'Reports',        icon: ChartBarIcon },
   { href: '/analytics',      label: 'Analytics',      icon: TrendIcon },
   { href: '/performance',    label: 'Performance',    icon: PerformanceIcon },

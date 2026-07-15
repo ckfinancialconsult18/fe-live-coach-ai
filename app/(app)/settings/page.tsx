@@ -9,7 +9,7 @@ import type { PlanId } from '@/app/api/billing/checkout/route';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type SettingsTab = 'profile' | 'agency' | 'notifications' | 'ai' | 'coaching' | 'integrations' | 'users' | 'billing';
+type SettingsTab = 'profile' | 'agency' | 'ai' | 'coaching' | 'billing';
 
 interface ProfileForm {
   firstName: string;
@@ -29,16 +29,6 @@ interface AgencyForm {
   agencyAddress: string;
   agencyCity: string;
   agencyState: string;
-}
-
-interface NotificationPreferences {
-  new_lead_assigned: boolean;
-  appointment_reminder: boolean;
-  task_due_date: boolean;
-  commission_paid: boolean;
-  policy_issued: boolean;
-  lead_status_change: boolean;
-  weekly_summary: boolean;
 }
 
 interface AiPreferences {
@@ -63,16 +53,6 @@ interface CoachingPreferences {
   talk_ratio_target: number;
 }
 
-const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
-  new_lead_assigned: true,
-  appointment_reminder: true,
-  task_due_date: true,
-  commission_paid: true,
-  policy_issued: true,
-  lead_status_change: false,
-  weekly_summary: true,
-};
-
 const DEFAULT_AI_PREFS: AiPreferences = {
   coaching_style: 'balanced',
   response_detail: 'concise',
@@ -94,16 +74,6 @@ const DEFAULT_COACHING_PREFS: CoachingPreferences = {
   talk_ratio_target: 40,
 };
 
-const NOTIFICATION_LABELS: { key: keyof NotificationPreferences; label: string; desc: string }[] = [
-  { key: 'new_lead_assigned',    label: 'New Lead Assigned',    desc: 'When a new lead is added to your pipeline' },
-  { key: 'appointment_reminder', label: 'Appointment Reminder', desc: '30 minutes before each scheduled appointment' },
-  { key: 'task_due_date',        label: 'Task Due Date',        desc: 'When a task is due today' },
-  { key: 'commission_paid',      label: 'Commission Paid',      desc: 'When a commission payment is received' },
-  { key: 'policy_issued',        label: 'Policy Issued',        desc: 'When a policy is confirmed as issued' },
-  { key: 'lead_status_change',   label: 'Lead Status Change',   desc: 'When a lead moves through the pipeline' },
-  { key: 'weekly_summary',       label: 'Weekly Summary',       desc: 'Weekly digest of activity and metrics' },
-];
-
 const US_STATES = [
   'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
   'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
@@ -118,11 +88,8 @@ const US_STATES = [
 const tabs: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'profile',       label: 'Profile',       icon: '👤' },
   { id: 'agency',        label: 'Agency',         icon: '🏢' },
-  { id: 'notifications', label: 'Notifications',  icon: '🔔' },
   { id: 'ai',           label: 'AI Settings',    icon: '🤖' },
   { id: 'coaching',     label: 'Coaching',       icon: '🎯' },
-  { id: 'integrations',  label: 'Integrations',   icon: '🔗' },
-  { id: 'users',         label: 'Users & Roles',  icon: '👥' },
   { id: 'billing',       label: 'Billing',        icon: '💳' },
 ];
 
@@ -159,11 +126,8 @@ export default function SettingsPage() {
 
       {activeTab === 'profile'       && <ProfileTab />}
       {activeTab === 'agency'        && <AgencyTab />}
-      {activeTab === 'notifications' && <NotificationsTab />}
       {activeTab === 'ai'            && <AiPreferencesTab />}
       {activeTab === 'coaching'      && <CoachingPreferencesTab />}
-      {activeTab === 'integrations'  && <IntegrationsTab />}
-      {activeTab === 'users'         && <UsersTab />}
       {activeTab === 'billing'       && <BillingTab />}
     </div>
   );
@@ -430,49 +394,6 @@ function AgencyTab() {
 }
 
 // ── Notifications Tab ─────────────────────────────────────────────────────────
-
-function NotificationsTab() {
-  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
-  const [loading, setLoading] = useState(true);
-  const { state, errorMsg, save } = useSaveState();
-
-  useEffect(() => {
-    fetch('/api/me')
-      .then((r) => r.json())
-      .then((d: { user?: { notificationPreferences?: Partial<NotificationPreferences> } }) => {
-        const saved = d.user?.notificationPreferences ?? {};
-        setPrefs({ ...DEFAULT_NOTIFICATIONS, ...saved });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  function toggle(key: keyof NotificationPreferences) {
-    setPrefs((p) => ({ ...p, [key]: !p[key] }));
-  }
-
-  if (loading) return <LoadingSkeleton />;
-
-  return (
-    <div className="glass-card rounded-2xl p-6 space-y-5">
-      <h2 className="text-lg font-semibold text-slate-100">Notification Preferences</h2>
-      {NOTIFICATION_LABELS.map(({ key, label, desc }) => (
-        <div key={key} className="flex items-center justify-between py-3 border-b border-white/6 last:border-0">
-          <div>
-            <p className="text-sm font-medium text-slate-200">{label}</p>
-            <p className="text-xs text-slate-500">{desc}</p>
-          </div>
-          <Toggle checked={prefs[key]} onChange={() => toggle(key)} />
-        </div>
-      ))}
-      <SaveBar
-        state={state}
-        errorMsg={errorMsg}
-        onSave={() => void save(async () => patchMe({ notificationPreferences: prefs }))}
-      />
-    </div>
-  );
-}
 
 // ── AI Preferences Tab ────────────────────────────────────────────────────────
 
@@ -762,60 +683,6 @@ function CoachingPreferencesTab() {
         errorMsg={errorMsg}
         onSave={() => void save(async () => patchMe({ coachingPreferences: prefs as unknown as Record<string, unknown> }))}
       />
-    </div>
-  );
-}
-
-// ── Integrations Tab ──────────────────────────────────────────────────────────
-
-function IntegrationsTab() {
-  const integrations = [
-    { name: 'Google Calendar', desc: 'Sync appointments with Google Calendar', icon: '📅' },
-    { name: 'Gmail',           desc: 'Send emails directly from CRM',          icon: '📧' },
-    { name: 'Twilio SMS',      desc: 'Send SMS messages to clients and leads', icon: '💬' },
-    { name: 'Zapier',          desc: 'Connect with 5000+ apps via Zapier',     icon: '⚡' },
-    { name: 'DocuSign',        desc: 'E-signature for policy documents',       icon: '✍️' },
-    { name: 'Dropbox',         desc: 'Cloud document storage',                icon: '📦' },
-  ];
-  return (
-    <div className="glass-card rounded-2xl p-6 space-y-4">
-      <h2 className="text-lg font-semibold text-slate-100">Integrations</h2>
-      {integrations.map((i) => (
-        <div key={i.name} className="flex items-center gap-4 p-4 rounded-xl border border-white/8 hover:bg-white/5 transition-colors">
-          <span className="text-2xl">{i.icon}</span>
-          <div className="flex-1">
-            <p className="font-medium text-slate-200">{i.name}</p>
-            <p className="text-xs text-slate-500">{i.desc}</p>
-          </div>
-          <Button size="sm" variant="secondary" disabled>Connect</Button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Users Tab ─────────────────────────────────────────────────────────────────
-
-function UsersTab() {
-  return (
-    <div className="glass-card rounded-2xl p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-100">Users & Roles</h2>
-        <Button size="sm" icon={<PlusIcon />} disabled>Invite User</Button>
-      </div>
-      <div className="mt-5 p-4 rounded-xl bg-white/3 border border-white/8">
-        <h3 className="text-sm font-semibold text-slate-300 mb-3">Role Permissions</h3>
-        <div className="grid grid-cols-3 gap-3 text-xs">
-          {(['Admin', 'Agent', 'Viewer'] as const).map((role) => (
-            <div key={role} className="p-3 rounded-lg bg-white/4">
-              <p className="font-semibold text-slate-300 mb-2">{role}</p>
-              {role === 'Admin'  && <p className="text-slate-500">Full access to all features, users, and settings</p>}
-              {role === 'Agent'  && <p className="text-slate-500">Manage own leads, clients, policies, and tasks</p>}
-              {role === 'Viewer' && <p className="text-slate-500">Read-only access to assigned records</p>}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
