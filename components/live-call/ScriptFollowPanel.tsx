@@ -1,6 +1,6 @@
 'use client';
 
-import type { CallStage, ChecklistItem, CoachInsight } from '@/lib/types';
+import type { CallStage, ChecklistItem, CoachInsight, TranscriptLine } from '@/lib/types';
 import type { CoachRagSource } from '@/hooks/useAICoach';
 import { STAGES } from './CallStagePanel';
 
@@ -21,6 +21,10 @@ interface Props {
   isAnalyzing: boolean;
   isInterimCoaching?: boolean;
   ragSources?: CoachRagSource[];
+  /** Live transcript — used to check off script tracks as they're delivered. */
+  transcript?: TranscriptLine[];
+  /** Lets the stage stepper act as manual navigation ("tell me where to go"). */
+  onStageSelect?: (stage: CallStage) => void;
 }
 
 const OBJECTION_CONFIDENCE_THRESHOLD = 55;
@@ -38,6 +42,31 @@ function overlapScore(a: string, b: string): number {
   return hits / Math.min(wa.size, wb.size);
 }
 
+const TRACK_MATCH_THRESHOLD = 0.5;
+
+/** True when any spoken line covers this script track. Matches against every
+ *  speaker — diarization can mislabel who said what, but script lines are
+ *  distinctive enough that a match means the agent delivered them. */
+function trackSaid(track: string, lines: TranscriptLine[]): boolean {
+  return lines.some((l) => overlapScore(track, l.text) >= TRACK_MATCH_THRESHOLD);
+}
+
+/** Per-stage script coverage from the live transcript. A stage counts as
+ *  delivered once at least half its tracks (minimum 2) have been spoken. */
+export function computeScriptProgress(lines: TranscriptLine[]): {
+  said: boolean[][];
+  suggestedStageIdx: number;
+} {
+  const said = STAGES.map((s) => s.required.map((track) => trackSaid(track, lines)));
+  let suggestedStageIdx = 0;
+  STAGES.forEach((stage, i) => {
+    const hits = said[i].filter(Boolean).length;
+    const needed = Math.min(stage.required.length, Math.max(2, Math.ceil(stage.required.length / 2)));
+    if (hits >= needed) suggestedStageIdx = Math.min(i + 1, STAGES.length - 1);
+  });
+  return { said, suggestedStageIdx };
+}
+
 export function ScriptFollowPanel({
   stage,
   insight,
@@ -45,7 +74,10 @@ export function ScriptFollowPanel({
   isAnalyzing,
   isInterimCoaching = false,
   ragSources = [],
+  transcript = [],
+  onStageSelect,
 }: Props) {
+  const { said } = computeScriptProgress(transcript);
   const currentIdx = STAGES.findIndex((s) => s.key === stage);
   const currentStage = STAGES[currentIdx];
   const nextStage = STAGES[currentIdx + 1];
@@ -123,7 +155,13 @@ export function ScriptFollowPanel({
         </div>
         <div className="flex items-center gap-1">
           {STAGES.map((s, i) => (
-            <div key={s.key} className="flex-1 flex flex-col items-center gap-0.5" title={s.label}>
+            <button
+              key={s.key}
+              onClick={() => onStageSelect?.(s.key)}
+              disabled={!onStageSelect}
+              title={onStageSelect ? `Jump to ${s.label}` : s.label}
+              className={`flex-1 flex flex-col items-center gap-0.5 ${onStageSelect ? 'cursor-pointer' : 'cursor-default'}`}
+            >
               <div
                 className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
                 style={
@@ -139,7 +177,7 @@ export function ScriptFollowPanel({
               <span className={`text-[8px] font-medium ${i === currentIdx ? 'text-[#D4AF37]' : 'text-slate-600'}`}>
                 {s.label}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -201,22 +239,36 @@ export function ScriptFollowPanel({
 
             <div className="space-y-1.5">
               {currentStage.required.map((track, i) => {
-                const isSuggested = i === suggestedTrackIdx;
+                const wasSaid = said[currentIdx]?.[i] ?? false;
+                const isSuggested = !wasSaid && i === suggestedTrackIdx;
                 return (
                   <div
                     key={track}
                     className="rounded-xl px-3 py-2.5 border flex items-start gap-2.5 transition-all"
                     style={
-                      isSuggested
-                        ? { background: 'rgba(212,175,55,0.1)', borderColor: 'rgba(212,175,55,0.45)' }
-                        : { background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }
+                      wasSaid
+                        ? { background: 'rgba(34,197,94,0.06)', borderColor: 'rgba(34,197,94,0.3)', opacity: 0.75 }
+                        : isSuggested
+                          ? { background: 'rgba(212,175,55,0.1)', borderColor: 'rgba(212,175,55,0.45)' }
+                          : { background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }
                     }
                   >
-                    <span className="mt-0.5 text-[10px] shrink-0" style={{ color: isSuggested ? gold : '#64748b' }}>
-                      {isSuggested ? '▶' : '▸'}
+                    <span
+                      className="mt-0.5 text-[10px] shrink-0"
+                      style={{ color: wasSaid ? '#4ade80' : isSuggested ? gold : '#64748b' }}
+                    >
+                      {wasSaid ? '✓' : isSuggested ? '▶' : '▸'}
                     </span>
                     <div className="min-w-0">
-                      <p className={`text-xs leading-snug ${isSuggested ? 'text-slate-100 font-medium' : 'text-slate-300'}`}>
+                      <p
+                        className={`text-xs leading-snug ${
+                          wasSaid
+                            ? 'text-slate-400 line-through decoration-slate-600'
+                            : isSuggested
+                              ? 'text-slate-100 font-medium'
+                              : 'text-slate-300'
+                        }`}
+                      >
                         {track}
                       </p>
                       {isSuggested && (

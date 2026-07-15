@@ -56,6 +56,7 @@ export interface UseDeepgramTranscriptionReturn {
   stopListening: () => void;
   clearTranscript: () => void;
   correctSpeaker: (lineId: string) => void;
+  swapSpeakers: () => void;
   enableSpeakerMode: () => Promise<void>;
   disableSpeakerMode: () => void;
   audioWarning: string | null;
@@ -112,7 +113,7 @@ interface WsServerMessage {
   serverTs?: number;
 }
 
-function dominantSpeaker(words: DgWord[]): 'agent' | 'prospect' {
+function dominantSpeaker(words: DgWord[], swapped: boolean): 'agent' | 'prospect' {
   if (!words.length) return 'agent';
   const counts: Record<number, number> = {};
   for (const w of words) {
@@ -120,7 +121,11 @@ function dominantSpeaker(words: DgWord[]): 'agent' | 'prospect' {
     counts[s] = (counts[s] ?? 0) + 1;
   }
   const top = Object.entries(counts).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
-  return Number(top[0]) === 0 ? 'agent' : 'prospect';
+  // Deepgram indexes voices by order of first appearance; we assume the first
+  // voice (0) is the agent. When the prospect spoke first, `swapped` inverts
+  // the mapping for the whole call (see swapSpeakers).
+  const isFirstVoice = Number(top[0]) === 0;
+  return isFirstVoice !== swapped ? 'agent' : 'prospect';
 }
 
 function bestMimeType(): string {
@@ -199,6 +204,9 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   // duplicate start (same stream → ignore) from a stale session left behind
   // after a mid-session device switch (different/dead stream → restart).
   const rawStreamRef = useRef<MediaStream | null>(null);
+  // Inverts the Deepgram voice-index → agent/prospect mapping for this call
+  // (used when the prospect happened to speak first).
+  const speakersSwappedRef = useRef(false);
 
   // Level monitor
   const monitorCtxRef = useRef<AudioContext | null>(null);
@@ -557,7 +565,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
         if (msg.transcript?.trim()) {
           addLine(
             msg.transcript,
-            dominantSpeaker(msg.words ?? []),
+            dominantSpeaker(msg.words ?? [], speakersSwappedRef.current),
             Math.round((msg.confidence ?? 0.8) * 100),
           );
         }
@@ -644,6 +652,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     shouldReconnectRef.current = true;
     reconnectAttemptRef.current = 0;
     usingWebSpeechRef.current = false;
+    speakersSwappedRef.current = false;
     silentTicksRef.current = 0;
     lastSentAtRef.current = 0;
     lastChunkPerfRef.current = 0;
@@ -797,6 +806,19 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     lineSeq = 0;
   }, []);
 
+  // Flip agent/prospect for the whole call: retroactively on every existing
+  // line, and for all future lines via the inverted voice-index mapping.
+  // One click fixes a call where the prospect happened to speak first.
+  const swapSpeakers = useCallback(() => {
+    speakersSwappedRef.current = !speakersSwappedRef.current;
+    setTranscript((prev) =>
+      prev.map((line) => ({
+        ...line,
+        speaker: line.speaker === 'agent' ? 'prospect' : 'agent',
+      }))
+    );
+  }, []);
+
   const correctSpeaker = useCallback((targetId: string) => {
     setTranscript((prev) =>
       prev.map((line) =>
@@ -839,6 +861,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
     stopListening,
     clearTranscript,
     correctSpeaker,
+    swapSpeakers,
     enableSpeakerMode: audioManager.acquireSpeakerMode,
     disableSpeakerMode: audioManager.releaseSpeakerMode,
     audioWarning: audioManager.warning,

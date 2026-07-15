@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { LiveTranscript } from '@/components/live-call/LiveTranscript';
 import { AICoachPanel } from '@/components/live-call/AICoachPanel';
-import { ScriptFollowPanel } from '@/components/live-call/ScriptFollowPanel';
-import { CallStagePanel } from '@/components/live-call/CallStagePanel';
+import { ScriptFollowPanel, computeScriptProgress } from '@/components/live-call/ScriptFollowPanel';
+import { CallStagePanel, STAGES } from '@/components/live-call/CallStagePanel';
 import { MetricsPanel } from '@/components/live-call/MetricsPanel';
 import { LiveCarrierPanel } from '@/components/live-call/LiveCarrierPanel';
 import { QuickObjectionBar } from '@/components/live-call/QuickObjectionBar';
@@ -74,10 +74,20 @@ function LiveCallPageInner() {
   const mic = useMicrophone();
   const {
     transcript, partial, connectionState, transcriptionMode, isListening, error,
-    startListening, stopListening, clearTranscript, correctSpeaker,
+    startListening, stopListening, clearTranscript, correctSpeaker, swapSpeakers,
     silenceWarning, audioWarning, recorderIntervalMs,
   } = useDeepgramTranscription(mic);
-  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis, ragSources } = useAICoach(transcript);
+  const { insight, stage, underwriting, carriers, checklist, isAnalyzing, scheduleAnalysis, memory, liveScores, missedOpportunities, liveObjectionState, liveClosingState, isInterimCoaching, scheduleInterimAnalysis, ragSources, setStage } = useAICoach(transcript);
+
+  // Script-driven stage advancement: when the transcript shows the agent has
+  // delivered the current stage's word tracks, move to the next stage without
+  // waiting for (or being blocked by) the AI stage detection.
+  useEffect(() => {
+    if (transcript.length === 0) return;
+    const { suggestedStageIdx } = computeScriptProgress(transcript);
+    const currentIdx = STAGES.findIndex((s) => s.key === stage);
+    if (suggestedStageIdx > currentIdx) setStage(STAGES[suggestedStageIdx].key);
+  }, [transcript, stage, setStage]);
 
   const [duration, setDuration] = useState(0);
   // Center panel view: unified script-follow (default) or classic AI coach.
@@ -522,7 +532,7 @@ function LiveCallPageInner() {
 
         {/* LEFT — Transcript (35%) */}
         <div className="flex flex-col w-[35%] min-w-0">
-          <LiveTranscript lines={transcript} partial={partial} isListening={isListening} onCorrectSpeaker={correctSpeaker} />
+          <LiveTranscript lines={transcript} partial={partial} isListening={isListening} onCorrectSpeaker={correctSpeaker} onSwapSpeakers={swapSpeakers} />
         </div>
 
         {/* CENTER — Script Follow / AI Coach (32%) */}
@@ -551,6 +561,8 @@ function LiveCallPageInner() {
                 isAnalyzing={isAnalyzing}
                 isInterimCoaching={isInterimCoaching}
                 ragSources={ragSources}
+                transcript={transcript}
+                onStageSelect={setStage}
               />
             ) : (
               <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} isInterimCoaching={isInterimCoaching} ragSources={ragSources} />

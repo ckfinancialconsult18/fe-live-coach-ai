@@ -9,9 +9,12 @@ interface Props {
   partial?: PartialTranscript | null;
   isListening: boolean;
   onCorrectSpeaker?: (lineId: string) => void;
+  /** Flips agent/prospect for every line, past and future — one-click fix for
+   *  calls where the prospect spoke first and the voice mapping came out inverted. */
+  onSwapSpeakers?: () => void;
 }
 
-export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }: Props) {
+export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker, onSwapSpeakers }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -77,6 +80,15 @@ export function LiveTranscript({ lines, partial, isListening, onCorrectSpeaker }
           >
             Auto-scroll
           </button>
+          {onSwapSpeakers && lines.length > 0 && (
+            <button
+              onClick={onSwapSpeakers}
+              title="Labels backwards? Flip agent/prospect for the whole call"
+              className="text-xs px-2 py-1 rounded-lg border bg-white/4 border-white/8 text-slate-400 hover:text-[#D4AF37] hover:border-[rgba(212,175,55,0.3)] transition-colors"
+            >
+              ⇄ Swap speakers
+            </button>
+          )}
         </div>
       </div>
 

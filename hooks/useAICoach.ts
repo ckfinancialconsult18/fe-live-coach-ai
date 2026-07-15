@@ -60,6 +60,10 @@ const DEFAULT_UNDERWRITING: UnderwritingProfile = {
   heartAttack: null, dialysis: null, dui: null, felony: null, bankruptcy: null, veteran: null,
 };
 
+// Canonical order of the six call stages — used to enforce forward-only
+// stage transitions.
+const STAGE_ORDER: CallStage[] = ['introduction', 'permission', 'discovery', 'health', 'budget', 'close'];
+
 export type CoachRagSource = {
   id: string;
   similarity: number;
@@ -251,7 +255,17 @@ export function useAICoach(transcript: TranscriptLine[]) {
   }, []);
 
   const applyMeta = useCallback((meta: { stage?: CallStage; underwriting?: Record<string, unknown>; checklist?: Record<string, boolean>; ragSources?: CoachRagSource[] }) => {
-    if (meta.stage) setStage(meta.stage);
+    // Stage only moves forward — the sales flow is one-directional, and a
+    // flaky detection (or a rate-limited side call) must never yank the agent
+    // back to an earlier script section mid-call.
+    if (meta.stage) {
+      setStage((prev) => {
+        const prevIdx = STAGE_ORDER.indexOf(prev);
+        const nextIdx = STAGE_ORDER.indexOf(meta.stage!);
+        if (prevIdx !== -1 && nextIdx !== -1 && nextIdx < prevIdx) return prev;
+        return meta.stage!;
+      });
+    }
     // Update knowledge base attribution on every confirmed analysis — an empty
     // array means this turn's advice used no KB material, so clear the display.
     if (Array.isArray(meta.ragSources)) setRagSources(meta.ragSources);
