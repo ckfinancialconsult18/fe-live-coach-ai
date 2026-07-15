@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import VideoBuilder from '@/components/knowledge/VideoBuilder';
+import { KnowledgeTabs } from '@/components/knowledge/KnowledgeTabs';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -890,9 +891,12 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="space-y-6 max-w-[1200px]">
-      <div>
-        <h2 className="text-xl font-bold text-slate-100">Knowledge Base</h2>
-        <p className="text-sm text-slate-500 mt-1">Upload carrier guides, scripts, and reference material — the AI references this during live calls</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100">Knowledge</h2>
+          <p className="text-sm text-slate-500 mt-1">Upload carrier guides, scripts, and reference material — the AI references this during live calls</p>
+        </div>
+        <KnowledgeTabs />
       </div>
 
       {/* Tab bar */}

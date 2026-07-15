@@ -21,8 +21,7 @@ const navItems = [
   { href: '/agency',         label: 'Agency',         icon: AgencyIcon },
   { href: '/carrier-guide',  label: 'Carrier Guide',  icon: BuildingIcon },
   { href: '/learn-from-call',    label: 'Learn From Call',  icon: LearnIcon },
-  { href: '/knowledge-center',   label: 'Knowledge Center', icon: KnowledgeCenterIcon },
-  { href: '/knowledge-base',     label: 'Knowledge Base',   icon: BookIcon },
+  { href: '/knowledge-base',     label: 'Knowledge',        icon: BookIcon },
 ];
 
 interface SidebarProps {

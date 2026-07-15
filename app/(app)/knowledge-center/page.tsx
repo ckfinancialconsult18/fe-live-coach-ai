@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, DragEvent, ChangeEvent } from 'react';
 import DOMPurify from 'dompurify';
+import { KnowledgeTabs } from '@/components/knowledge/KnowledgeTabs';
 import { scoreColor } from '@/lib/score-color';
 import type { PipelineJob, PendingEntryIndex, PendingKnowledgeEntry, PipelineStats, SearchResult } from '@/lib/pipeline/types';
 
@@ -154,11 +155,12 @@ export default function KnowledgeCenterPage() {
       )}
 
       {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/6">
+      <div className="shrink-0 flex items-center justify-between gap-4 flex-wrap px-6 py-4 border-b border-white/6">
         <div>
-          <h1 className="text-lg font-bold text-slate-100">Knowledge Center</h1>
+          <h1 className="text-lg font-bold text-slate-100">Knowledge</h1>
           <p className="text-xs text-slate-500 mt-0.5">Continuous learning pipeline — upload transcripts, review insights, grow the AI coaching model</p>
         </div>
+        <KnowledgeTabs />
         <div className="flex items-center gap-3">
           {isProcessing && (
             <div className="flex items-center gap-2 text-xs text-[#D4AF37]">
