@@ -42,13 +42,33 @@ function overlapScore(a: string, b: string): number {
   return hits / Math.min(wa.size, wb.size);
 }
 
-const TRACK_MATCH_THRESHOLD = 0.5;
+const normWords = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3);
 
-/** True when any spoken line covers this script track. Matches against every
- *  speaker — diarization can mislabel who said what, but script lines are
- *  distinctive enough that a match means the agent delivered them. */
+/** True when spoken text covers ≥60% of the track's significant words.
+ *  Track-anchored (never scored against the shorter side) so tiny transcript
+ *  fragments like "today?" can't match a whole script line. Consecutive line
+ *  pairs are also checked because utterances often split mid-sentence.
+ *  Matches against every speaker — diarization can mislabel who said what,
+ *  but script lines are distinctive enough that a match means the agent
+ *  delivered them. */
 function trackSaid(track: string, lines: TranscriptLine[]): boolean {
-  return lines.some((l) => overlapScore(track, l.text) >= TRACK_MATCH_THRESHOLD);
+  const trackWords = new Set(normWords(track));
+  if (trackWords.size < 3) return false;
+
+  const candidates: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    candidates.push(lines[i].text);
+    if (i + 1 < lines.length) candidates.push(`${lines[i].text} ${lines[i + 1].text}`);
+  }
+
+  return candidates.some((text) => {
+    const spoken = new Set(normWords(text));
+    if (spoken.size < 4) return false; // too short to be a delivered script line
+    let hits = 0;
+    for (const w of trackWords) if (spoken.has(w)) hits++;
+    return hits / trackWords.size >= 0.6;
+  });
 }
 
 /** Per-stage script coverage from the live transcript. A stage counts as

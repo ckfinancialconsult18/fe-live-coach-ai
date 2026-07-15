@@ -90,6 +90,9 @@ function LiveCallPageInner() {
   }, [transcript, stage, setStage]);
 
   const [duration, setDuration] = useState(0);
+  // Call lifecycle guards — block overlapping starts and duplicate ends.
+  const callActiveRef = useRef(false);
+  const endingCallRef = useRef(false);
   // Center panel view: unified script-follow (default) or classic AI coach.
   // Read from localStorage after mount to avoid a hydration mismatch.
   const [centerView, setCenterView] = useState<'script' | 'coach'>('script');
@@ -318,6 +321,16 @@ function LiveCallPageInner() {
   const bridge = useLiveCallBridge();
 
   const startCall = useCallback(async () => {
+    // Re-entry guard: a stray second Start (double-click, or the TopNav button
+    // while a call is already running) must not spawn an overlapping call —
+    // that leaves a phantom timer counting and produces empty-transcript
+    // reports when the extra call is ended.
+    if (callActiveRef.current) {
+      console.warn('[startCall] call already active — ignoring');
+      return;
+    }
+    callActiveRef.current = true;
+
     // Bug 2 fix: clear any existing timer before creating a new one.
     // If startCall is somehow invoked while a previous call is winding up,
     // this prevents two setIntervals running simultaneously and leaking.
@@ -337,7 +350,7 @@ function LiveCallPageInner() {
     setMomentum(0);
 
     const stream = await mic.start();
-    if (!stream) return; // mic.error already surfaces a real error to the UI
+    if (!stream) { callActiveRef.current = false; return; } // mic.error already surfaces a real error to the UI
 
     // Pass the stream directly — mic.stream React state may not have flushed yet.
     await startListening(stream);
@@ -357,6 +370,20 @@ function LiveCallPageInner() {
 
   const endCall = useCallback(async () => {
     console.log('[endCall] button clicked');
+
+    // Guards: ignore End Call when no call is running (e.g. a stale header
+    // button after the call already ended) and when an end is already in
+    // flight (double-click) — both used to produce duplicate/empty reports.
+    if (endingCallRef.current) {
+      console.warn('[endCall] already ending — ignoring');
+      return;
+    }
+    if (!callActiveRef.current) {
+      console.warn('[endCall] no active call — ignoring');
+      return;
+    }
+    endingCallRef.current = true;
+    callActiveRef.current = false;
 
     // ── 1. Capture callId before any cleanup nullifies it ─────────────────────
     const pendingCallId = autosave.callId;
@@ -380,7 +407,7 @@ function LiveCallPageInner() {
     try { mic.stop(); console.log('[endCall] mic.stop OK'); }
     catch (e) { console.error('[endCall] mic.stop threw:', e); }
 
-    try { if (timerRef.current) clearInterval(timerRef.current); }
+    try { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } }
     catch (e) { console.error('[endCall] clearInterval threw:', e); }
     window.dispatchEvent(new CustomEvent('live-call-state', { detail: { live: false, duration: 0 } }));
 
@@ -469,6 +496,7 @@ function LiveCallPageInner() {
       setPostCallError(`Network error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoadingReport(false);
+      endingCallRef.current = false;
     }
   }, [stopListening, mic, transcript, duration, metrics, autosave, timeline]);
 
