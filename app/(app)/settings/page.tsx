@@ -479,7 +479,19 @@ function NotificationsTab() {
 function AiPreferencesTab() {
   const [prefs, setPrefs] = useState<AiPreferences>(DEFAULT_AI_PREFS);
   const [loading, setLoading] = useState(true);
+  const [customCarrier, setCustomCarrier] = useState('');
   const { state, errorMsg, save } = useSaveState();
+
+  const addCustomCarrier = () => {
+    const name = customCarrier.trim().slice(0, 80);
+    if (!name) return;
+    setPrefs((p) =>
+      p.appointed_carriers.some((n) => n.toLowerCase() === name.toLowerCase())
+        ? p
+        : { ...p, appointed_carriers: [...p.appointed_carriers, name] }
+    );
+    setCustomCarrier('');
+  };
 
   useEffect(() => {
     fetch('/api/me')
@@ -610,11 +622,58 @@ function AiPreferencesTab() {
               );
             })}
           </div>
-          {prefs.appointed_carriers.length > 0 && (
-            <p className="text-xs text-slate-600 mt-2">
-              {prefs.appointed_carriers.length} of {CARRIERS.length} carriers selected
-            </p>
+          {/* Custom carriers the agent added (not in the built-in engine list) */}
+          {prefs.appointed_carriers.filter((n) => !CARRIERS.some((c) => c.name === n)).length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {prefs.appointed_carriers
+                .filter((n) => !CARRIERS.some((c) => c.name === n))
+                .map((name) => (
+                  <span
+                    key={name}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-500 bg-blue-500/15 text-blue-300 text-xs font-medium"
+                  >
+                    ✓ {name}
+                    <button
+                      onClick={() =>
+                        setPrefs((p) => ({
+                          ...p,
+                          appointed_carriers: p.appointed_carriers.filter((n) => n !== name),
+                        }))
+                      }
+                      className="text-blue-400 hover:text-red-400 font-bold"
+                      title={`Remove ${name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+            </div>
           )}
+
+          <div className="flex gap-2 mt-3">
+            <input
+              type="text"
+              value={customCarrier}
+              onChange={(e) => setCustomCarrier(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomCarrier(); } }}
+              placeholder="Appointed with a carrier not listed? Type its name…"
+              className="flex-1 h-9 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+            />
+            <button
+              onClick={addCustomCarrier}
+              disabled={!customCarrier.trim()}
+              className="px-4 h-9 rounded-xl border border-white/10 bg-white/5 text-sm font-medium text-slate-300 hover:bg-white/8 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+          <p className="text-xs text-slate-600 mt-2">
+            {prefs.appointed_carriers.length > 0 && (
+              <>{prefs.appointed_carriers.length} carrier{prefs.appointed_carriers.length === 1 ? '' : 's'} selected. </>
+            )}
+            Custom carriers guide the AI coach's advice; for underwriting-fit scoring on them,
+            upload the carrier's underwriting guide to your Knowledge Base.
+          </p>
         </div>
       </div>
 
