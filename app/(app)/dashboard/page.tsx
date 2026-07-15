@@ -13,11 +13,10 @@ function startOfDay(d: Date) {
 function endOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).toISOString();
 }
-function startOfWeek(d: Date) {
-  const day = d.getDay();
-  const start = new Date(d);
-  start.setDate(d.getDate() - day);
-  return startOfDay(start);
+function daysAgo(base: Date, n: number) {
+  const d = new Date(base);
+  d.setDate(base.getDate() - n);
+  return d;
 }
 
 export default async function DashboardPage() {
@@ -26,21 +25,19 @@ export default async function DashboardPage() {
   const today = new Date();
   const todayStart = startOfDay(today);
   const todayEnd = endOfDay(today);
-  const weekStart = startOfWeek(today);
-  const monthKey = today.toISOString().slice(0, 7);
+  // Rolling analytics windows: last 7 days vs the 7 days before that.
+  const last7Start = startOfDay(daysAgo(today, 6));
+  const prev7Start = startOfDay(daysAgo(today, 13));
 
-  const [callsToday, callsThisWeek, apptsToday, commissionsThisMonth, recentCallsRaw] = await Promise.all([
+  const [callsToday, scoresTwoWeeks, recentCallsRaw] = await Promise.all([
     supabase.from('calls').select('id, outcome').gte('started_at', todayStart).lte('started_at', todayEnd),
-    supabase.from('call_scores').select('overall_score, created_at').gte('created_at', weekStart),
-    supabase.from('appointments').select('*').gte('start_time', todayStart).lte('start_time', todayEnd).eq('status', 'scheduled').order('start_time'),
-    supabase.from('commissions').select('amount').eq('month', monthKey),
-    supabase.from('calls').select('id, contact_id, started_at, outcome, call_scores(overall_score)').order('started_at', { ascending: false }).limit(4),
+    supabase.from('call_scores').select('overall_score, created_at').gte('created_at', prev7Start).order('created_at'),
+    supabase.from('calls').select('id, contact_id, started_at, outcome, call_scores(overall_score)').order('started_at', { ascending: false }).limit(5),
   ]);
 
-  const contactIds = [
-    ...(apptsToday.data ?? []).map((a) => a.contact_id),
-    ...(recentCallsRaw.data ?? []).map((c) => c.contact_id),
-  ].filter((id): id is string => !!id);
+  const contactIds = (recentCallsRaw.data ?? [])
+    .map((c) => c.contact_id)
+    .filter((id): id is string => !!id);
   const { data: contacts } = contactIds.length
     ? await supabase.from('contacts').select('id, first_name, last_name').in('id', contactIds)
     : { data: [] as { id: string; first_name: string; last_name: string }[] };
@@ -49,17 +46,45 @@ export default async function DashboardPage() {
     return c ? `${c.first_name} ${c.last_name}` : 'Unknown';
   };
 
-  const policiesToday = (callsToday.data ?? []).filter((c) => c.outcome === 'policy_written').length;
-  const avgScore = callsThisWeek.data?.length
-    ? Math.round(callsThisWeek.data.reduce((s, c) => s + (c.overall_score ?? 0), 0) / callsThisWeek.data.length)
-    : 0;
-  const monthlyCommission = (commissionsThisMonth.data ?? []).reduce((s, c) => s + Number(c.amount), 0);
+  // ── Performance analytics from the last two weeks of call scores ────────────
+  const allScores = scoresTwoWeeks.data ?? [];
+  const last7 = allScores.filter((s) => s.created_at >= last7Start);
+  const prev7 = allScores.filter((s) => s.created_at < last7Start);
+  const avg = (rows: { overall_score: number | null }[]) =>
+    rows.length ? Math.round(rows.reduce((s, r) => s + (r.overall_score ?? 0), 0) / rows.length) : null;
+
+  const avg7 = avg(last7);
+  const avgPrev7 = avg(prev7);
+  const delta = avg7 !== null && avgPrev7 !== null ? avg7 - avgPrev7 : null;
+  const best7 = last7.length ? Math.max(...last7.map((s) => s.overall_score ?? 0)) : null;
+  const todayScores = last7.filter((s) => s.created_at >= todayStart);
+  const avgToday = avg(todayScores);
+
+  // Daily average bars for the last 7 days (oldest → newest)
+  const dailyBars = Array.from({ length: 7 }, (_, i) => {
+    const day = daysAgo(today, 6 - i);
+    const dStart = startOfDay(day);
+    const dEnd = endOfDay(day);
+    const rows = last7.filter((s) => s.created_at >= dStart && s.created_at <= dEnd);
+    return {
+      label: day.toLocaleDateString('en-US', { weekday: 'narrow' }),
+      isToday: i === 6,
+      avg: avg(rows),
+      count: rows.length,
+    };
+  });
 
   const kpis = [
-    { label: "Today's Calls", value: String((callsToday.data ?? []).length), sub: `${policiesToday} policies written`, color: '#D4AF37', icon: PhoneIcon },
-    { label: 'Appointments', value: String((apptsToday.data ?? []).length), sub: (apptsToday.data ?? [])[0] ? `Next at ${fmtTime((apptsToday.data ?? [])[0].start_time)}` : 'None scheduled', color: '#22c55e', icon: CalendarIcon },
-    { label: 'Policies Written', value: String(policiesToday), sub: `$${monthlyCommission.toLocaleString()} commission MTD`, color: '#a78bfa', icon: ShieldIcon },
-    { label: 'Avg Call Score', value: `${avgScore}%`, sub: 'This week', color: '#06b6d4', icon: TrendIcon },
+    { label: "Today's Calls", value: String((callsToday.data ?? []).length), sub: `${last7.length} scored in last 7 days`, color: '#D4AF37', icon: PhoneIcon },
+    { label: "Today's Avg Score", value: avgToday !== null ? `${avgToday}%` : '—', sub: todayScores.length ? `across ${todayScores.length} call${todayScores.length === 1 ? '' : 's'}` : 'No scored calls yet', color: '#22c55e', icon: TargetIcon },
+    {
+      label: '7-Day Avg Score',
+      value: avg7 !== null ? `${avg7}%` : '—',
+      sub: delta === null ? 'vs prior week: no data' : delta === 0 ? 'even with prior week' : delta > 0 ? `▲ +${delta} vs prior week` : `▼ ${delta} vs prior week`,
+      color: '#06b6d4',
+      icon: TrendIcon,
+    },
+    { label: 'Best Call', value: best7 !== null ? `${best7}%` : '—', sub: 'past 7 days', color: '#a78bfa', icon: StarIcon },
   ];
 
   const recentCalls = (recentCallsRaw.data ?? []).map((c) => ({
@@ -70,18 +95,14 @@ export default async function DashboardPage() {
     outcome: c.outcome ?? 'pending',
   }));
 
-  const upcomingAppts = (apptsToday.data ?? []).map((a) => ({
-    id: a.id,
-    name: a.contact_id ? contactName(a.contact_id) : a.title,
-    time: fmtTime(a.start_time),
-    type: a.type,
-  }));
-
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div className="animate-fade-in-up">
         <h2 className="text-2xl font-bold text-slate-100">Good afternoon{user?.email ? `, ${user.email.split('@')[0]}` : ''}</h2>
-        <p className="text-sm text-slate-500 mt-1">You have {upcomingAppts.length} appointments today and {policiesToday} policies written today.</p>
+        <p className="text-sm text-slate-500 mt-1">
+          {(callsToday.data ?? []).length} call{(callsToday.data ?? []).length === 1 ? '' : 's'} coached today
+          {avg7 !== null ? ` · ${avg7}% average score this week` : ''}
+        </p>
       </div>
 
       {/* Start Call CTA */}
@@ -157,35 +178,51 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Appointments */}
+        {/* Performance Trend — daily average scores, last 7 days */}
         <div className="glass-card rounded-2xl p-5 animate-fade-in-up">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-slate-200">Upcoming Appointments</h3>
-            <span className="text-[10px] font-semibold text-[#D4AF37] bg-[rgba(212,175,55,0.1)] px-2 py-1 rounded-full">
-              {upcomingAppts.length} today
-            </span>
+            <h3 className="text-sm font-semibold text-slate-200">Performance Trend</h3>
+            <Link href="/performance" className="text-xs text-[#D4AF37] hover:text-[#eec94a] transition-colors">Full report</Link>
           </div>
-          <div className="space-y-2">
-            {upcomingAppts.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/4 border border-white/6">
-                <div className="w-9 h-9 rounded-lg bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
-                  <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-200">{a.name}</p>
-                  <p className="text-xs text-slate-500 capitalize">{a.type.replace('_', ' ')} · {a.time}</p>
-                </div>
-                <Link href="/live-call"
-                  className="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition-colors"
-                  style={{ background: 'rgba(212,175,55,0.12)', color: '#D4AF37', border: '1px solid rgba(212,175,55,0.25)' }}>
-                  Coach
-                </Link>
+          {last7.length > 0 ? (
+            <>
+              <div className="flex items-end justify-between gap-2 h-32 px-1">
+                {dailyBars.map((d, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
+                    {d.avg !== null && (
+                      <span className="text-[10px] font-bold text-slate-400">{d.avg}</span>
+                    )}
+                    <div
+                      className="w-full rounded-t-md transition-all"
+                      style={{
+                        height: d.avg !== null ? `${Math.max(6, d.avg)}%` : '3px',
+                        background: d.avg === null
+                          ? 'rgba(255,255,255,0.06)'
+                          : d.isToday
+                            ? 'linear-gradient(180deg,#D4AF37,#9a7a0a)'
+                            : 'rgba(212,175,55,0.35)',
+                      }}
+                      title={d.avg !== null ? `${d.avg}% avg across ${d.count} call${d.count === 1 ? '' : 's'}` : 'No scored calls'}
+                    />
+                    <span className={`text-[10px] font-medium ${d.isToday ? 'text-[#D4AF37]' : 'text-slate-600'}`}>{d.label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-            {upcomingAppts.length === 0 && <p className="text-sm text-slate-600 text-center py-6">No appointments today</p>}
-          </div>
+              <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/6 text-xs">
+                <span className="text-slate-500">This week <span className="font-bold text-slate-300">{avg7 ?? '—'}%</span></span>
+                <span className="text-slate-500">Prior week <span className="font-bold text-slate-300">{avgPrev7 ?? '—'}%</span></span>
+                {delta !== null && (
+                  <span className={`font-bold ${delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {delta > 0 ? `▲ +${delta}` : delta < 0 ? `▼ ${delta}` : '—'}
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-600 text-center py-10">
+              Complete a few coached calls and your score trend will appear here
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -199,18 +236,17 @@ function PhoneIcon() {
     </svg>
   );
 }
-function CalendarIcon() {
+function TargetIcon() {
   return (
     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="3" y="4" width="18" height="18" rx="2"/>
-      <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
     </svg>
   );
 }
-function ShieldIcon() {
+function StarIcon() {
   return (
     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
     </svg>
   );
 }

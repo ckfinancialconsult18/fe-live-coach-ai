@@ -18,8 +18,6 @@ const navItems = [
   { href: '/past-calls',     label: 'Past Calls',     icon: ClockIcon },
   { href: '/role-play',      label: 'Role Play',      icon: MicIcon },
   { href: '/reports',        label: 'Reports',        icon: ChartBarIcon },
-  { href: '/analytics',      label: 'Analytics',      icon: TrendIcon },
-  { href: '/performance',    label: 'Performance',    icon: PerformanceIcon },
   { href: '/agency',         label: 'Agency',         icon: AgencyIcon },
   { href: '/carrier-guide',  label: 'Carrier Guide',  icon: BuildingIcon },
   { href: '/learn-from-call',    label: 'Learn From Call',  icon: LearnIcon },
@@ -43,8 +41,6 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
 
   const stats = [
     { label: "Today's Calls", value: me ? String(me.todayStats.calls) : '—' },
-    { label: 'Appointments',  value: me ? String(me.todayStats.appointments) : '—' },
-    { label: 'Policies',      value: me ? String(me.todayStats.policiesWritten) : '—' },
     { label: 'Avg Score',     value: me?.todayStats.avgScore != null ? `${me.todayStats.avgScore}%` : '—' },
   ];
 
