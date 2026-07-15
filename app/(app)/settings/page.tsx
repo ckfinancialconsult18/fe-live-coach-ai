@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { CARRIERS } from '@/lib/carrier-rules';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -49,6 +50,8 @@ interface AiPreferences {
   focus_rapport: boolean;
   focus_needs_assessment: boolean;
   focus_product_knowledge: boolean;
+  /** Carriers the agent is appointed/contracted with. Empty = show all. */
+  appointed_carriers: string[];
 }
 
 interface CoachingPreferences {
@@ -79,6 +82,7 @@ const DEFAULT_AI_PREFS: AiPreferences = {
   focus_rapport: false,
   focus_needs_assessment: false,
   focus_product_knowledge: false,
+  appointed_carriers: [],
 };
 
 const DEFAULT_COACHING_PREFS: CoachingPreferences = {
@@ -571,6 +575,46 @@ function AiPreferencesTab() {
               </div>
             ))}
           </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">My Carriers</label>
+          <p className="text-xs text-slate-500 mb-3">
+            Select the carriers you're appointed with. Live-call carrier recommendations will only
+            show these, so you're never pointed at an application you can't write.
+            Leave all unselected to see every carrier.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {CARRIERS.map((c) => {
+              const selected = prefs.appointed_carriers.includes(c.name);
+              return (
+                <button
+                  key={c.name}
+                  onClick={() =>
+                    setPrefs((p) => ({
+                      ...p,
+                      appointed_carriers: selected
+                        ? p.appointed_carriers.filter((n) => n !== c.name)
+                        : [...p.appointed_carriers, c.name],
+                    }))
+                  }
+                  title={c.product}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                    selected
+                      ? 'border-blue-500 bg-blue-500/15 text-blue-300'
+                      : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/8'
+                  }`}
+                >
+                  {selected ? '✓ ' : ''}{c.name}
+                </button>
+              );
+            })}
+          </div>
+          {prefs.appointed_carriers.length > 0 && (
+            <p className="text-xs text-slate-600 mt-2">
+              {prefs.appointed_carriers.length} of {CARRIERS.length} carriers selected
+            </p>
+          )}
         </div>
       </div>
 

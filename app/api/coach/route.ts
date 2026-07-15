@@ -39,6 +39,14 @@ function buildPreferencesDirective(prefs: Record<string, unknown>): string {
     lines.push(`FOCUS AREAS: Prioritize coaching around ${focuses.join(', ')}. When multiple observations are possible, surface the one most relevant to these areas.`);
   }
 
+  const appointed = prefs.appointed_carriers;
+  if (Array.isArray(appointed) && appointed.length > 0) {
+    lines.push(
+      `APPOINTED CARRIERS: The agent can ONLY write business with: ${appointed.join(', ')}. ` +
+      'Never recommend, suggest, or mention any other insurance carrier — the agent cannot submit applications with them.'
+    );
+  }
+
   return lines.join('\n');
 }
 

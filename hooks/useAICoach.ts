@@ -97,6 +97,20 @@ export function useAICoach(transcript: TranscriptLine[]) {
   const [isInterimCoaching, setIsInterimCoaching] = useState(false);
   const [ragSources, setRagSources] = useState<CoachRagSource[]>([]);
 
+  // Carriers the agent is appointed with (from Settings → AI Preferences).
+  // Carrier recommendations are filtered to this list so the agent is never
+  // pointed at an application they can't write. Empty = no filter.
+  const appointedCarriersRef = useRef<string[]>([]);
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { user?: { aiPreferences?: { appointed_carriers?: string[] } } } | null) => {
+        const list = d?.user?.aiPreferences?.appointed_carriers;
+        if (Array.isArray(list)) appointedCarriersRef.current = list;
+      })
+      .catch(() => { /* no filter on failure */ });
+  }, []);
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -297,7 +311,9 @@ export function useAICoach(transcript: TranscriptLine[]) {
         if (u.felony !== null && u.felony !== undefined)       next.felony = u.felony as boolean;
         if (u.bankruptcy !== null && u.bankruptcy !== undefined) next.bankruptcy = u.bankruptcy as boolean;
         if (u.veteran !== null && u.veteran !== undefined)     next.veteran = u.veteran as boolean;
-        setCarriers(matchCarriersEnhanced(next));
+        const appointed = appointedCarriersRef.current;
+        const matches = matchCarriersEnhanced(next);
+        setCarriers(appointed.length > 0 ? matches.filter((m) => appointed.includes(m.name)) : matches);
         return next;
       });
     }

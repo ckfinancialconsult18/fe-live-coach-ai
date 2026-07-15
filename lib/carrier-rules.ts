@@ -462,7 +462,7 @@ function scoreSBLI(p: UnderwritingProfile, age: number, bmi: number | null): Car
 // ── Carrier scoring registry ──────────────────────────────────────────────────
 type ScorerFn = (p: UnderwritingProfile, age: number, bmi: number | null) => CarrierResult;
 
-const CARRIERS: { name: string; product: string; scorer: ScorerFn }[] = [
+export const CARRIERS: { name: string; product: string; scorer: ScorerFn }[] = [
   { name: 'Mutual of Omaha',      product: 'Living Promise',           scorer: scoreMutualOfOmaha },
   { name: 'SBLI',                 product: 'Simple Life',              scorer: scoreSBLI },
   { name: 'Americo',              product: 'Eagle Premier',            scorer: scoreAmerico },
