@@ -12,16 +12,31 @@ type MeResponse = {
   todayStats: { calls: number; appointments: number; policiesWritten: number; avgScore: number | null };
 };
 
-const navItems = [
-  { href: '/dashboard',      label: 'Dashboard',      icon: GridIcon },
-  { href: '/live-call',      label: 'Live Calls',     icon: PhoneIcon },
-  { href: '/past-calls',     label: 'Past Calls',     icon: ClockIcon },
-  { href: '/role-play',      label: 'Role Play',      icon: MicIcon },
-  { href: '/reports',        label: 'Reports',        icon: ChartBarIcon },
-  { href: '/agency',         label: 'Agency',         icon: AgencyIcon },
-  { href: '/carrier-guide',  label: 'Carrier Guide',  icon: BuildingIcon },
-  { href: '/learn-from-call',    label: 'Learn From Call',  icon: LearnIcon },
-  { href: '/knowledge-base',     label: 'Knowledge',        icon: BookIcon },
+const navSections = [
+  {
+    title: 'Daily Tools',
+    items: [
+      { href: '/dashboard',  label: 'Dashboard',  icon: GridIcon },
+      { href: '/live-call',  label: 'Live Calls', icon: PhoneIcon },
+      { href: '/past-calls', label: 'Past Calls', icon: ClockIcon },
+      { href: '/role-play',  label: 'Role Play',  icon: MicIcon },
+    ],
+  },
+  {
+    title: 'Insights',
+    items: [
+      { href: '/reports', label: 'Reports', icon: ChartBarIcon },
+      { href: '/agency',  label: 'Agency',  icon: AgencyIcon },
+    ],
+  },
+  {
+    title: 'Resources',
+    items: [
+      { href: '/carrier-guide',   label: 'Carrier Guide',   icon: BuildingIcon },
+      { href: '/learn-from-call', label: 'Learn From Call', icon: LearnIcon },
+      { href: '/knowledge-base',  label: 'Knowledge',       icon: BookIcon },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -77,40 +92,94 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {navItems.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + '/');
-          const isLive = item.href === '/live-call';
-          const Icon = item.icon;
-          return (
+      {/* Profile + quick keys */}
+      <div className="px-3 py-4 border-b border-white/6">
+        <div className={`flex items-center gap-3 px-1 ${collapsed ? 'justify-center' : ''}`}>
+          <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[#090d18] text-xs font-extrabold"
+            style={me?.user.avatarUrl ? {} : { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
+            {me?.user.avatarUrl
+              ? <Image src={me.user.avatarUrl} alt={displayName} width={36} height={36} className="w-full h-full object-cover" />
+              : initials}
+          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-100 truncate">{displayName}</p>
+              <p className="text-[10px] text-slate-500 truncate">Final Expense {roleLabel}</p>
+            </div>
+          )}
+        </div>
+        {!collapsed && (
+          <div className="flex items-center gap-1.5 mt-3">
             <Link
-              key={item.href}
-              href={item.href}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                transition-all duration-150
-                ${active
-                  ? 'text-[#D4AF37] bg-[rgba(212,175,55,0.10)] border-r-2 border-[#D4AF37]'
-                  : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
-                }
-                ${collapsed ? 'justify-center' : ''}
-              `}
-              title={collapsed ? item.label : undefined}
+              href="/settings"
+              title="Settings"
+              className="flex-1 flex items-center justify-center h-8 rounded-lg bg-white/4 border border-white/8 text-slate-400 hover:text-[#D4AF37] hover:border-[rgba(212,175,55,0.3)] transition-colors"
             >
-              <Icon active={active} />
-              {!collapsed && (
-                <span className="flex-1">{item.label}</span>
-              )}
-              {!collapsed && isLive && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/15 text-green-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-live" />
-                  LIVE
-                </span>
-              )}
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
             </Link>
-          );
-        })}
+            <a
+              href="mailto:ckfinancialconsult@gmail.com?subject=FE%20Live%20Coach%20%E2%80%94%20Help%20request"
+              title="Help & support"
+              className="flex-1 flex items-center justify-center h-8 rounded-lg bg-white/4 border border-white/8 text-slate-400 hover:text-[#D4AF37] hover:border-[rgba(212,175,55,0.3)] transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
+        {navSections.map((section, sIdx) => (
+          <div key={section.title} className="space-y-0.5">
+            {!collapsed ? (
+              <p className="px-3 pb-1 text-[9px] font-bold text-slate-600 uppercase tracking-[0.18em]">
+                {section.title}
+              </p>
+            ) : (
+              sIdx > 0 && <div className="border-t border-white/6 mx-2 mb-1.5" />
+            )}
+            {section.items.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + '/');
+              const isLive = item.href === '/live-call';
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`
+                    flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+                    transition-all duration-150
+                    ${active
+                      ? 'text-[#D4AF37] bg-[rgba(212,175,55,0.10)] border-r-2 border-[#D4AF37]'
+                      : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+                    }
+                    ${collapsed ? 'justify-center' : ''}
+                  `}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon active={active} />
+                  {!collapsed && (
+                    <span className="flex-1">{item.label}</span>
+                  )}
+                  {!collapsed && isLive && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/15 text-green-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-live" />
+                      LIVE
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Stats */}
@@ -142,27 +211,16 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         </div>
       )}
 
-      {/* User */}
+      {/* Sign out */}
       <div className="p-3 border-t border-white/6">
         <form action={signOut}>
           <button
             type="submit"
             title={collapsed ? 'Sign out' : undefined}
-            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors text-left ${collapsed ? 'justify-center' : ''}`}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors ${collapsed ? 'justify-center' : ''}`}
           >
-            <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[#090d18] text-xs font-extrabold"
-              style={me?.user.avatarUrl ? {} : { background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}>
-              {me?.user.avatarUrl
-                ? <Image src={me.user.avatarUrl} alt={displayName} width={32} height={32} className="w-full h-full object-cover" />
-                : initials}
-            </div>
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-slate-200 truncate">{displayName}</p>
-                <p className="text-[10px] text-slate-500 truncate">Final Expense {roleLabel}</p>
-              </div>
-            )}
-            {!collapsed && <SignOutIcon />}
+            <SignOutIcon />
+            {!collapsed && <span>Sign Out</span>}
           </button>
         </form>
       </div>

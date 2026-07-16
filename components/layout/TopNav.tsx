@@ -1,21 +1,17 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import Link from 'next/link';
 import { useLiveCallBridge } from '@/lib/live-call-bridge';
-import { signOut } from '@/app/(auth)/actions';
 
 const breadcrumbMap: Record<string, string> = {
   '/dashboard':      'Dashboard',
   '/live-call':      'Live Call',
   '/past-calls':     'Past Calls',
   '/role-play':      'Role Play',
-  '/contacts':       'Contacts',
   '/reports':        'Reports',
-  '/analytics':      'Analytics',
   '/carrier-guide':  'Carrier Guide',
-  '/knowledge-base': 'Knowledge Base',
+  '/knowledge-base': 'Knowledge',
   '/settings':       'Settings',
 };
 
@@ -28,19 +24,7 @@ export function TopNav({ onMenuToggle }: TopNavProps) {
   const [time, setTime] = useState('');
   const [isLive, setIsLive] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const bridge = useLiveCallBridge();
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
 
   useEffect(() => {
     function tick() {
@@ -130,46 +114,6 @@ export function TopNav({ onMenuToggle }: TopNavProps) {
           </div>
         )}
 
-        {/* User avatar + dropdown */}
-        <div className="relative ml-1" ref={menuRef}>
-          <button
-            onClick={() => setMenuOpen((o) => !o)}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[#090d18] text-xs font-extrabold"
-            style={{ background: 'linear-gradient(135deg, #D4AF37, #b8940f)' }}
-          >
-            CK
-          </button>
-
-          {menuOpen && (
-            <div className="absolute right-0 top-10 w-44 rounded-xl border border-white/10 bg-[#0e1525] shadow-2xl z-50 overflow-hidden">
-              <Link
-                href="/settings"
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2.5 px-4 py-3 text-sm text-slate-300 hover:bg-white/5 transition-colors"
-              >
-                <svg className="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="12" cy="12" r="3"/>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-                Settings
-              </Link>
-              <div className="border-t border-white/6" />
-              <form action={signOut}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-2.5 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/>
-                    <line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                  Sign Out
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
       </div>
     </header>
   );
