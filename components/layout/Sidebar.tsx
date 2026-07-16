@@ -16,10 +16,11 @@ const navSections = [
   {
     title: 'Daily Tools',
     items: [
-      { href: '/dashboard',  label: 'Dashboard',  icon: GridIcon },
-      { href: '/live-call',  label: 'Live Calls', icon: PhoneIcon },
-      { href: '/past-calls', label: 'Past Calls', icon: ClockIcon },
-      { href: '/role-play',  label: 'Role Play',  icon: MicIcon },
+      { href: '/dashboard',     label: 'Dashboard',     icon: GridIcon },
+      { href: '/live-call',     label: 'Live Calls',    icon: PhoneIcon },
+      { href: '/past-calls',    label: 'Past Calls',    icon: ClockIcon },
+      { href: '/role-play',     label: 'Role Play',     icon: MicIcon },
+      { href: '/carrier-guide', label: 'Carrier Guide', icon: BuildingIcon },
     ],
   },
   {
@@ -32,7 +33,6 @@ const navSections = [
   {
     title: 'Resources',
     items: [
-      { href: '/carrier-guide',   label: 'Carrier Guide',   icon: BuildingIcon },
       { href: '/learn-from-call', label: 'Learn From Call', icon: LearnIcon },
       { href: '/knowledge-base',  label: 'Knowledge',       icon: BookIcon },
     ],
@@ -107,32 +107,32 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               <p className="text-[10px] text-slate-500 truncate">Final Expense {roleLabel}</p>
             </div>
           )}
+          {!collapsed && (
+            <div className="flex items-center gap-1 shrink-0">
+              <Link
+                href="/settings"
+                title="Settings"
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-[#D4AF37] hover:bg-white/5 transition-colors"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </Link>
+              <a
+                href="mailto:ckfinancialconsult@gmail.com?subject=FE%20Live%20Coach%20%E2%80%94%20Help%20request"
+                title="Help & support"
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-[#D4AF37] hover:bg-white/5 transition-colors"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </a>
+            </div>
+          )}
         </div>
-        {!collapsed && (
-          <div className="flex items-center gap-1.5 mt-3">
-            <Link
-              href="/settings"
-              title="Settings"
-              className="flex-1 flex items-center justify-center h-8 rounded-lg bg-white/4 border border-white/8 text-slate-400 hover:text-[#D4AF37] hover:border-[rgba(212,175,55,0.3)] transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </Link>
-            <a
-              href="mailto:ckfinancialconsult@gmail.com?subject=FE%20Live%20Coach%20%E2%80%94%20Help%20request"
-              title="Help & support"
-              className="flex-1 flex items-center justify-center h-8 rounded-lg bg-white/4 border border-white/8 text-slate-400 hover:text-[#D4AF37] hover:border-[rgba(212,175,55,0.3)] transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-            </a>
-          </div>
-        )}
       </div>
 
       {/* Nav */}
