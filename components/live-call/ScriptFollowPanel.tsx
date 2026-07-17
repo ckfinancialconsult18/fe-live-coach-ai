@@ -71,6 +71,23 @@ function trackSaid(track: string, lines: TranscriptLine[]): boolean {
   });
 }
 
+/** True when the text strongly covers any script track. Used to detect an
+ *  inverted diarization mapping: only the agent reads the script, so a
+ *  "prospect"-labeled line matching a track means the labels are backwards. */
+export function textMatchesScript(text: string): boolean {
+  const spoken = new Set(normWords(text));
+  if (spoken.size < 4) return false;
+  return STAGES.some((stage) =>
+    stage.required.some((track) => {
+      const trackWords = new Set(normWords(track));
+      if (trackWords.size < 3) return false;
+      let hits = 0;
+      for (const w of trackWords) if (spoken.has(w)) hits++;
+      return hits / trackWords.size >= 0.6;
+    })
+  );
+}
+
 /** Per-stage script coverage from the live transcript. A stage counts as
  *  delivered once at least half its tracks (minimum 2) have been spoken. */
 export function computeScriptProgress(lines: TranscriptLine[]): {

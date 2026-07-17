@@ -124,11 +124,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
                 title="Help & support"
                 className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-[#D4AF37] hover:bg-white/5 transition-colors"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
+                <span className="text-[13px] font-extrabold leading-none">?</span>
               </a>
             </div>
           )}

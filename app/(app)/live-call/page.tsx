@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { LiveTranscript } from '@/components/live-call/LiveTranscript';
 import { AICoachPanel } from '@/components/live-call/AICoachPanel';
-import { ScriptFollowPanel, computeScriptProgress } from '@/components/live-call/ScriptFollowPanel';
+import { ScriptFollowPanel, computeScriptProgress, textMatchesScript } from '@/components/live-call/ScriptFollowPanel';
 import { CallStagePanel, STAGES } from '@/components/live-call/CallStagePanel';
 import { MetricsPanel } from '@/components/live-call/MetricsPanel';
 import { LiveCarrierPanel } from '@/components/live-call/LiveCarrierPanel';
@@ -88,6 +88,23 @@ function LiveCallPageInner() {
     const currentIdx = STAGES.findIndex((s) => s.key === stage);
     if (suggestedStageIdx > currentIdx) setStage(STAGES[suggestedStageIdx].key);
   }, [transcript, stage, setStage]);
+
+  // Auto-correct inverted speaker labels: diarization assumes the first voice
+  // heard is the agent, but when the prospect answers first the mapping comes
+  // out backwards. Only the agent delivers script lines — so early in the call,
+  // a script-matching line labeled "prospect" (with none labeled "agent") means
+  // the labels are flipped. Swap once, automatically.
+  const autoSwappedRef = useRef(false);
+  useEffect(() => {
+    if (autoSwappedRef.current || transcript.length === 0 || transcript.length > 8) return;
+    const prospectScripted = transcript.some((l) => l.speaker === 'prospect' && textMatchesScript(l.text));
+    const agentScripted = transcript.some((l) => l.speaker === 'agent' && textMatchesScript(l.text));
+    if (prospectScripted && !agentScripted) {
+      autoSwappedRef.current = true;
+      console.log('[live-call] script lines detected under prospect label — auto-swapping speakers');
+      swapSpeakers();
+    }
+  }, [transcript, swapSpeakers]);
 
   const [duration, setDuration] = useState(0);
   // Call lifecycle guards — block overlapping starts and duplicate ends.
@@ -337,6 +354,7 @@ function LiveCallPageInner() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
 
     clearTranscript();
+    autoSwappedRef.current = false;
     setDuration(0);
     setPostCallReport(null);
     setShowPostCall(false);

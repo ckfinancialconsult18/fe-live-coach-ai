@@ -243,7 +243,12 @@ export async function POST(req: NextRequest) {
           }),
         ]);
 
-        const coachModel = process.env.OPENAI_COACH_MODEL ?? 'gpt-4.1';
+        // Default to gpt-4o-mini: its rate limits are ~7x higher than gpt-4.1
+        // on starter OpenAI tiers. gpt-4.1 at coaching frequency exhausts a
+        // 30k-TPM allowance mid-call, and every request after that 429s —
+        // leaving the coach panel stuck on default advice for the whole call.
+        // Set OPENAI_COACH_MODEL=gpt-4.1 once the OpenAI org tier can take it.
+        const coachModel = process.env.OPENAI_COACH_MODEL ?? 'gpt-4o-mini';
 
         const coachStream = await openai.chat.completions.create({
           model: coachModel,
