@@ -2,6 +2,7 @@
 
 import type { CallStage, ChecklistItem, CoachInsight, TranscriptLine } from '@/lib/types';
 import type { CoachRagSource } from '@/hooks/useAICoach';
+import { DEFAULT_RECOMMENDED_RESPONSE } from '@/hooks/useAICoach';
 import { STAGES } from './CallStagePanel';
 
 // One-line purpose shown under each stage header, mirroring the training guide.
@@ -129,6 +130,15 @@ export function ScriptFollowPanel({
   const sayNow = activeObjection?.recommendedResponse || insight.recommendedResponse;
   const askNext = insight.nextBestAction?.nextQuestion || insight.nextBestQuestion;
 
+  // Script mode: until the AI produces real conversation-specific advice, Say
+  // Now walks the script itself — the first unsaid track of the current stage.
+  // At call start that's the opener; as tracks get delivered it moves down.
+  const nextTrackIdx = said[currentIdx]?.findIndex((s) => !s) ?? -1;
+  const nextTrack = nextTrackIdx >= 0 ? currentStage?.required[nextTrackIdx] ?? null : null;
+  const aiHasRealAdvice =
+    transcript.length > 0 && insight.recommendedResponse !== DEFAULT_RECOMMENDED_RESPONSE;
+  const scriptMode = !aiHasRealAdvice && nextTrack !== null;
+
   // Highlight the script track that best matches what the AI suggests next.
   const suggestedTrackIdx = (() => {
     if (!currentStage || !askNext) return -1;
@@ -242,8 +252,24 @@ export function ScriptFollowPanel({
           </div>
         )}
 
+        {/* SAY NOW — script line until the AI has conversation-specific advice */}
+        {!activeObjection && scriptMode && (
+          <div className="rounded-xl p-3 border space-y-1.5"
+            style={{ background: 'rgba(212,175,55,0.08)', borderColor: 'rgba(212,175,55,0.35)' }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: gold }}>
+              ▶ Say now — from your script
+            </p>
+            <p className="text-sm text-slate-100 leading-relaxed font-medium">{nextTrack}</p>
+            <p className="text-xs text-slate-500 pt-1 border-t border-white/6">
+              {transcript.length === 0
+                ? 'Open with this — AI coaching takes over as the conversation develops.'
+                : 'AI is listening — advice updates as the conversation develops.'}
+            </p>
+          </div>
+        )}
+
         {/* SAY NOW — the AI's live line, styled like a key track */}
-        {!activeObjection && (
+        {!activeObjection && !scriptMode && (
           <div className="rounded-xl p-3 border space-y-1.5"
             style={{ background: 'rgba(212,175,55,0.08)', borderColor: 'rgba(212,175,55,0.35)' }}>
             <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: gold }}>
@@ -277,7 +303,7 @@ export function ScriptFollowPanel({
             <div className="space-y-1.5">
               {currentStage.required.map((track, i) => {
                 const wasSaid = said[currentIdx]?.[i] ?? false;
-                const isSuggested = !wasSaid && i === suggestedTrackIdx;
+                const isSuggested = !wasSaid && i === (scriptMode ? nextTrackIdx : suggestedTrackIdx);
                 return (
                   <div
                     key={track}
@@ -310,7 +336,7 @@ export function ScriptFollowPanel({
                       </p>
                       {isSuggested && (
                         <span className="inline-block mt-1 text-[9px] font-bold uppercase tracking-wider" style={{ color: gold }}>
-                          ● AI suggests this next
+                          {scriptMode ? '● Up next' : '● AI suggests this next'}
                         </span>
                       )}
                     </div>

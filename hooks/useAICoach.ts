@@ -28,11 +28,15 @@ function mergeMemory(prev: CallMemory, updates: Partial<CallMemory> | null | und
   };
 }
 
+// Exported so panels can tell "no AI insight yet" apart from real advice.
+export const DEFAULT_RECOMMENDED_RESPONSE =
+  'Listen carefully and let the prospect finish their thought before responding.';
+
 const DEFAULT_INSIGHT: CoachInsight = {
   detectedObjection: null,
   objectType: null,
   confidence: 0,
-  recommendedResponse: 'Listen carefully and let the prospect finish their thought before responding.',
+  recommendedResponse: DEFAULT_RECOMMENDED_RESPONSE,
   alternativeResponses: [],
   whyThisWorks: 'Active listening builds trust and uncovers the real concern.',
   nextBestQuestion: 'Tell me a little more about what\'s most important to you about this coverage.',
