@@ -46,14 +46,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: uploadError.message }, { status: 500 });
     }
 
-    // Extract → normalize. Reuses the existing transcript/document parser
-    // (handles txt/md/pdf/docx).
+    // Extract → normalize. For PDFs, only attempt the fast text-layer extraction
+    // here (pdf-parse). If no text layer is found, save as pending — OCR via
+    // GPT-4o vision runs later in /api/knowledge/process-queue or on retry.
+    // This keeps uploads fast and prevents timeouts on large scanned PDFs.
     const buffer = Buffer.from(await file.arrayBuffer());
     let rawText = '';
+    const isPdf = /\.pdf$/i.test(file.name);
     try {
-      const format = detectFormat(file.name);
-      const parsed = await parseTranscript(buffer, format, file.name);
-      rawText = normalizeText(parsed.text);
+      if (isPdf) {
+        // Fast text-layer only — no GPT-4o vision during upload
+        try {
+          const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
+          const result = await pdfParse(buffer);
+          const extracted = (result.text ?? '').trim();
+          if (extracted.length > 200) rawText = normalizeText(extracted);
+        } catch { /* no text layer — will be OCR'd at process time */ }
+      } else {
+        const format = detectFormat(file.name);
+        const parsed = await parseTranscript(buffer, format, file.name);
+        rawText = normalizeText(parsed.text);
+      }
     } catch (err) {
       console.error('Text extraction failed:', err);
       await logPipelineEvent(supabase, {
