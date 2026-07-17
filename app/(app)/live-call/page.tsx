@@ -106,6 +106,23 @@ function LiveCallPageInner() {
     }
   }, [transcript, swapSpeakers]);
 
+  // Continuous label healing: script lines only ever come from the agent. Once
+  // the mapping is established (some agent-labeled script line exists — so the
+  // global auto-swap above is settled), any later script-matching line labeled
+  // "prospect" is a diarization error — flip just that line. correctSpeaker
+  // marks lines as edited, so each line is corrected at most once and manual
+  // corrections are never overridden.
+  useEffect(() => {
+    const agentScripted = transcript.some((l) => l.speaker === 'agent' && textMatchesScript(l.text));
+    if (!agentScripted) return; // early-call phase belongs to the global auto-swap
+    for (const l of transcript) {
+      if (l.speaker === 'prospect' && !l.speakerEdited && textMatchesScript(l.text)) {
+        console.log('[live-call] healing mislabeled script line →', l.text.slice(0, 60));
+        correctSpeaker(l.id);
+      }
+    }
+  }, [transcript, correctSpeaker]);
+
   const [duration, setDuration] = useState(0);
   // Call lifecycle guards — block overlapping starts and duplicate ends.
   const callActiveRef = useRef(false);
