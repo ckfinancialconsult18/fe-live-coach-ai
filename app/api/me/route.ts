@@ -7,6 +7,7 @@ const PROFILE_FIELDS = [
   'agency_phone', 'agency_email', 'agency_website', 'agency_tax_id',
   'agency_address', 'agency_city', 'agency_state',
   'notification_preferences', 'ai_preferences', 'coaching_preferences',
+  'carrier_portals',
 ].join(', ');
 
 export async function GET() {
@@ -58,6 +59,7 @@ export async function GET() {
       notificationPreferences: (profile?.notification_preferences ?? {}) as Record<string, boolean>,
       aiPreferences: (profile?.ai_preferences ?? {}) as Record<string, unknown>,
       coachingPreferences: (profile?.coaching_preferences ?? {}) as Record<string, unknown>,
+      carrierPortals: (profile?.carrier_portals ?? {}) as Record<string, { portal_url: string; portal_username?: string }>,
     },
     todayStats: {
       calls: callsToday ?? 0,
@@ -89,6 +91,7 @@ interface ProfilePatchBody {
   notificationPreferences?: Record<string, boolean>;
   aiPreferences?: Record<string, unknown>;
   coachingPreferences?: Record<string, unknown>;
+  carrierPortals?: Record<string, { portal_url: string; portal_username?: string }>;
 }
 
 export async function PATCH(req: NextRequest) {
@@ -122,6 +125,7 @@ export async function PATCH(req: NextRequest) {
   if (body.notificationPreferences !== undefined) update.notification_preferences = body.notificationPreferences;
   if (body.aiPreferences !== undefined) update.ai_preferences = body.aiPreferences;
   if (body.coachingPreferences !== undefined) update.coaching_preferences = body.coachingPreferences;
+  if (body.carrierPortals !== undefined) update.carrier_portals = body.carrierPortals;
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });

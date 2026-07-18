@@ -149,6 +149,7 @@ function LiveCallPageInner() {
   const [momentum, setMomentum] = useState(0);
   const [preflight, setPreflight] = useState<PreflightResult>(null);
   const [showPreflight, setShowPreflight] = useState(true);
+  const [carrierPortals, setCarrierPortals] = useState<Record<string, { portal_url: string; portal_username?: string }>>({});
   const [callStartMs, setCallStartMs] = useState(0);
   const [showPerfDebug, setShowPerfDebug] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -177,6 +178,16 @@ function LiveCallPageInner() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Load carrier portal URLs once on mount so the Open Portal button is ready
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => r.json())
+      .then((d: { user?: { carrierPortals?: Record<string, { portal_url: string; portal_username?: string }> } }) => {
+        if (d.user?.carrierPortals) setCarrierPortals(d.user.carrierPortals);
+      })
+      .catch(() => {});
   }, []);
 
   // Pre-flight check: verify all requirements before the user clicks Start Call
@@ -680,7 +691,7 @@ function LiveCallPageInner() {
               </div>
             )}
             {rightTab === 'uw' && (
-              <LiveCarrierPanel carriers={carriers} underwriting={underwriting} />
+              <LiveCarrierPanel carriers={carriers} underwriting={underwriting} carrierPortals={carrierPortals} />
             )}
             {rightTab === 'discovery' && (
               <MissedOpportunityPanel state={missedOpportunities} isAnalyzing={isAnalyzing} />

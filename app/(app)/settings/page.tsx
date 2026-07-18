@@ -9,7 +9,7 @@ import type { PlanId } from '@/app/api/billing/checkout/route';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type SettingsTab = 'profile' | 'agency' | 'ai' | 'coaching' | 'billing';
+type SettingsTab = 'profile' | 'agency' | 'ai' | 'coaching' | 'portals' | 'billing';
 
 interface ProfileForm {
   firstName: string;
@@ -90,7 +90,8 @@ const tabs: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'agency',        label: 'Agency',         icon: '🏢' },
   { id: 'ai',           label: 'AI Settings',    icon: '🤖' },
   { id: 'coaching',     label: 'Coaching',       icon: '🎯' },
-  { id: 'billing',       label: 'Billing',        icon: '💳' },
+  { id: 'portals',      label: 'Carrier Portals', icon: '🔑' },
+  { id: 'billing',      label: 'Billing',         icon: '💳' },
 ];
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -128,6 +129,7 @@ export default function SettingsPage() {
       {activeTab === 'agency'        && <AgencyTab />}
       {activeTab === 'ai'            && <AiPreferencesTab />}
       {activeTab === 'coaching'      && <CoachingPreferencesTab />}
+      {activeTab === 'portals'       && <CarrierPortalsTab />}
       {activeTab === 'billing'       && <BillingTab />}
     </div>
   );
@@ -865,6 +867,109 @@ function BillingTab() {
         <p className="text-xs text-slate-600 text-center">
           Payments processed securely by Stripe. Cancel anytime.
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Carrier Portals Tab ───────────────────────────────────────────────────────
+
+interface PortalEntry { portal_url: string; portal_username: string }
+
+function CarrierPortalsTab() {
+  const [portals, setPortals] = useState<Record<string, PortalEntry>>({});
+  const [loading, setLoading] = useState(true);
+  const { state, errorMsg, save } = useSaveState();
+
+  // Also load the appointed carriers list so we can prefill the carrier list
+  const [appointedCarriers, setAppointedCarriers] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => r.json())
+      .then((d: { user?: { carrierPortals?: Record<string, PortalEntry>; aiPreferences?: { appointed_carriers?: string[] } } }) => {
+        setPortals((d.user?.carrierPortals as Record<string, PortalEntry>) ?? {});
+        setAppointedCarriers(d.user?.aiPreferences?.appointed_carriers ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Merge built-in CARRIERS list + appointed custom carriers for display
+  const allCarrierNames = Array.from(new Set([
+    ...CARRIERS.map((c) => c.name),
+    ...appointedCarriers,
+  ])).sort();
+
+  function setField(carrierName: string, field: keyof PortalEntry, value: string) {
+    setPortals((prev) => ({
+      ...prev,
+      [carrierName]: { portal_url: '', portal_username: '', ...prev[carrierName], [field]: value },
+    }));
+  }
+
+  async function handleSave() {
+    await save(() => patchMe({ carrierPortals: portals }));
+  }
+
+  if (loading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-5">
+      <div className="glass-card rounded-2xl p-6 space-y-5">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">Carrier Portal Access</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Store each carrier's agent portal URL and your username. During a live call, a one-click
+            button will open the portal — your browser's saved password fills the rest.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {allCarrierNames.map((name) => {
+            const entry = portals[name] ?? { portal_url: '', portal_username: '' };
+            const hasSaved = entry.portal_url.length > 0;
+            return (
+              <div key={name} className="rounded-xl p-4 space-y-3"
+                style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${hasSaved ? 'rgba(212,175,55,0.25)' : 'rgba(255,255,255,0.07)'}` }}>
+                <div className="flex items-center gap-2">
+                  {hasSaved && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[rgba(212,175,55,0.12)] border border-[rgba(212,175,55,0.25)] text-[#D4AF37]">✓ Saved</span>}
+                  <p className="text-sm font-semibold text-slate-200">{name}</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Portal URL</label>
+                    <Input
+                      value={entry.portal_url}
+                      onChange={(e) => setField(name, 'portal_url', e.target.value)}
+                      placeholder="https://agent.carrier.com/login"
+                      type="url"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Your Username / Email</label>
+                    <Input
+                      value={entry.portal_username}
+                      onChange={(e) => setField(name, 'portal_username', e.target.value)}
+                      placeholder="agent@email.com"
+                      type="text"
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <SaveBar state={state} errorMsg={errorMsg} onSave={() => void handleSave()} />
+      </div>
+
+      <div className="rounded-xl p-4 text-sm text-slate-500 space-y-1"
+        style={{ background: 'rgba(212,175,55,0.04)', border: '1px solid rgba(212,175,55,0.12)' }}>
+        <p className="font-semibold text-[#D4AF37] text-xs uppercase tracking-wider mb-1">🔒 Privacy Note</p>
+        <p>Portal URLs and usernames are stored in your account to pre-fill the login page. Passwords are
+        never stored here — your browser's password manager handles those. Each click opens a new tab
+        at the portal URL.</p>
       </div>
     </div>
   );

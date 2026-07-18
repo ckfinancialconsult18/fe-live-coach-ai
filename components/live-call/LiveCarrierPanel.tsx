@@ -9,9 +9,12 @@ import type {
 } from '@/lib/types';
 import { matchCarriersEnhanced, getMissingUWQuestions } from '@/lib/carrier-rules';
 
+interface PortalEntry { portal_url: string; portal_username?: string }
+
 interface Props {
   carriers: EnhancedCarrierMatch[];
   underwriting: UnderwritingProfile;
+  carrierPortals?: Record<string, PortalEntry>;
 }
 
 // ── Approval config ───────────────────────────────────────────────────────────
@@ -153,7 +156,7 @@ function WhatIfPanel({ baseProfile }: WhatIfPanelProps) {
 }
 
 // ── Main panel ────────────────────────────────────────────────────────────────
-export function LiveCarrierPanel({ carriers, underwriting }: Props) {
+export function LiveCarrierPanel({ carriers, underwriting, carrierPortals = {} }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [showAllQuestions, setShowAllQuestions] = useState(false);
 
@@ -273,6 +276,28 @@ export function LiveCarrierPanel({ carriers, underwriting }: Props) {
                 return (
                   <div key={c.name} className="rounded-xl overflow-hidden transition-all"
                     style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${i === 0 ? 'rgba(212,175,55,0.25)' : 'rgba(255,255,255,0.07)'}` }}>
+
+                    {/* Open Portal button — shown above the card header when a portal URL is saved */}
+                    {carrierPortals[c.name]?.portal_url && (
+                      <div className="px-3 pt-2.5 pb-0">
+                        <a
+                          href={carrierPortals[c.name].portal_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90"
+                          style={{ background: 'rgba(212,175,55,0.15)', border: '1px solid rgba(212,175,55,0.35)', color: '#D4AF37' }}
+                          title={carrierPortals[c.name].portal_username ? `Username: ${carrierPortals[c.name].portal_username}` : undefined}
+                        >
+                          🔑 Open Portal
+                          {carrierPortals[c.name].portal_username && (
+                            <span className="text-[10px] font-normal opacity-70 truncate max-w-[120px]">
+                              — {carrierPortals[c.name].portal_username}
+                            </span>
+                          )}
+                        </a>
+                      </div>
+                    )}
 
                     {/* Card header */}
                     <button
