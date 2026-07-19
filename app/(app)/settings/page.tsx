@@ -904,7 +904,7 @@ function CarrierPortalsTab() {
   function setField(carrierName: string, field: keyof PortalEntry, value: string) {
     setPortals((prev) => ({
       ...prev,
-      [carrierName]: { portal_url: '', portal_username: '', ...prev[carrierName], [field]: value },
+      [carrierName]: { ...({ portal_url: '', portal_username: '' }), ...prev[carrierName], [field]: value },
     }));
   }
 
