@@ -49,7 +49,7 @@ export async function requestMicrophoneStream(deviceId?: string): Promise<MediaS
       deviceId: deviceId ? { exact: deviceId } : undefined,
       echoCancellation: false,
       noiseSuppression: false,
-      autoGainControl: true,
+      autoGainControl: false,
       channelCount: 1,
     },
     video: false,
