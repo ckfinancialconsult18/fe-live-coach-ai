@@ -1,26 +1,25 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { appointmentFromRow, appointmentToRow } from '@/lib/api/mappers';
+import { requireUser } from '@/lib/api/guard';
 
 export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const { data, error } = await supabase
     .from('appointments')
     .select('*')
+    .eq('user_id', user.id)
     .order('start_time', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to load appointments' }, { status: 500 });
   return NextResponse.json({ appointments: (data ?? []).map(appointmentFromRow) });
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const body = await request.json();
   const { data, error } = await supabase
@@ -29,6 +28,6 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to create appointment' }, { status: 500 });
   return NextResponse.json({ appointment: appointmentFromRow(data) }, { status: 201 });
 }

@@ -182,21 +182,25 @@ function LiveCallPageInner() {
 
   // Load carrier portal URLs once on mount so the Open Portal button is ready
   useEffect(() => {
-    fetch('/api/me')
+    const ac = new AbortController();
+    fetch('/api/me', { signal: ac.signal })
       .then((r) => r.json())
       .then((d: { user?: { carrierPortals?: Record<string, { portal_url: string; portal_username?: string }> } }) => {
         if (d.user?.carrierPortals) setCarrierPortals(d.user.carrierPortals);
       })
       .catch(() => {});
+    return () => ac.abort();
   }, []);
 
   // Pre-flight check: verify all requirements before the user clicks Start Call
   // so failures surface with exact, actionable messages rather than mid-call.
   useEffect(() => {
-    fetch('/api/live-call-status')
+    const ac = new AbortController();
+    fetch('/api/live-call-status', { signal: ac.signal })
       .then((r) => r.json())
       .then((data: PreflightResult) => setPreflight(data))
-      .catch(() => {
+      .catch((err) => {
+        if ((err as Error).name === 'AbortError') return;
         setPreflight({
           ok: false,
           checks: {
@@ -207,6 +211,7 @@ function LiveCallPageInner() {
           },
         });
       });
+    return () => ac.abort();
   }, []);
 
   // Momentum: real rate-of-change of closeOpportunityPct over the last ~15s

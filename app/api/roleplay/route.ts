@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { openai } from '@/lib/openai';
 import { getPersona } from '@/lib/roleplay-personas';
 import { requireUser } from '@/lib/api/guard';
 import { checkRateLimit, roleplayLimiter } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const { user, response } = await requireUser();
   if (!user) return response;
 

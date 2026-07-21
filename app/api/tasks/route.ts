@@ -1,26 +1,25 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { taskFromRow, taskToRow } from '@/lib/api/mappers';
+import { requireUser } from '@/lib/api/guard';
 
 export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const { data, error } = await supabase
     .from('tasks')
     .select('*')
+    .eq('user_id', user.id)
     .order('due_date', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to load tasks' }, { status: 500 });
   return NextResponse.json({ tasks: (data ?? []).map(taskFromRow) });
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const body = await request.json();
   const { data, error } = await supabase
@@ -29,6 +28,6 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to create task' }, { status: 500 });
   return NextResponse.json({ task: taskFromRow(data) }, { status: 201 });
 }

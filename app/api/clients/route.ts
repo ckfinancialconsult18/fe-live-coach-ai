@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireUser } from '@/lib/api/guard';
 
 export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const { data: clients, error } = await supabase
     .from('clients')
     .select('*')
+    .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to load clients' }, { status: 500 });
 
   const contactIds = (clients ?? []).map((c) => c.id);
   const { data: policies } = contactIds.length

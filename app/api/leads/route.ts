@@ -10,9 +10,10 @@ export async function GET() {
   const { data, error } = await supabase
     .from('leads')
     .select('*')
+    .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to load leads' }, { status: 500 });
   return NextResponse.json({ leads: (data ?? []).map(leadFromRow) });
 }
 
