@@ -355,6 +355,7 @@ function RolePlayPageInner() {
 
   const [input, setInput] = useState('');
   const [coachTab, setCoachTab] = useState<CoachTab>('score');
+  const [mobileRolePlayTab, setMobileRolePlayTab] = useState<'chat' | 'coach'>('chat');
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -498,10 +499,27 @@ function RolePlayPageInner() {
   const dc = DIFFICULTY_CONFIG[session.persona.difficulty];
 
   return (
-    <div className="flex h-full gap-0 overflow-hidden -mx-4 -mt-2">
+    <div className="flex flex-col md:flex-row h-full gap-0 overflow-hidden -mx-4 -mt-2">
+
+      {/* Mobile tab bar */}
+      <div className="flex md:hidden shrink-0 border-b border-white/6">
+        {([['chat', '💬 Chat'], ['coach', '🤖 Coach']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setMobileRolePlayTab(key)}
+            className={`flex-1 py-2.5 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+              mobileRolePlayTab === key
+                ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* ── Left: Chat ────────────────────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0 border-r border-white/6">
+      <div className={`flex-col flex-1 min-w-0 border-r border-white/6 ${mobileRolePlayTab === 'coach' ? 'hidden md:flex' : 'flex'}`}>
 
         {/* Session header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-white/6 shrink-0">
@@ -632,7 +650,7 @@ function RolePlayPageInner() {
       </div>
 
       {/* ── Right: Coaching panels ─────────────────────────────────────────── */}
-      <div className="w-[340px] flex flex-col shrink-0">
+      <div className={`flex-col shrink-0 md:w-[340px] ${mobileRolePlayTab === 'chat' ? 'hidden md:flex' : 'flex w-full'}`}>
         {/* Coach tab bar */}
         <div className="flex border-b border-white/6 shrink-0">
           {(Object.keys(COACH_TAB_LABELS) as CoachTab[]).map(tab => (

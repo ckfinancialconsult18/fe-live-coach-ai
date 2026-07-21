@@ -39,6 +39,7 @@ export default function PastCallsPage() {
   const [coachingLoading, setCoachingLoading] = useState(false);
   const [detailTab, setDetailTab] = useState<'metrics' | 'coaching'>('metrics');
   const [copied, setCopied] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const call = calls.find((c) => c.id === selected);
 
   async function deleteCall(id: string) {
@@ -76,7 +77,7 @@ export default function PastCallsPage() {
   return (
     <div className="flex h-full gap-5 min-h-0">
       {/* List */}
-      <div className="flex flex-col w-96 shrink-0 space-y-2 overflow-y-auto">
+      <div className={`flex-col space-y-2 overflow-y-auto shrink-0 w-full md:w-80 ${mobileView === 'detail' ? 'hidden md:flex' : 'flex'}`}>
         <div className="mb-1">
           <h2 className="text-lg font-bold text-slate-100">Past Calls</h2>
           <p className="text-xs text-slate-500">{calls.length} calls</p>
@@ -86,7 +87,7 @@ export default function PastCallsPage() {
           return (
             <div key={c.id} className="relative group">
               <button
-                onClick={() => setSelected(c.id)}
+                onClick={() => { setSelected(c.id); setMobileView('detail'); }}
                 className={`w-full text-left p-4 rounded-2xl border transition-all ${
                   selected === c.id
                     ? 'border-[rgba(212,175,55,0.4)] bg-[rgba(212,175,55,0.06)]'
@@ -126,7 +127,7 @@ export default function PastCallsPage() {
       </div>
 
       {/* Detail */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      <div className={`flex-col flex-1 min-w-0 overflow-y-auto ${mobileView === 'list' ? 'hidden md:flex' : 'flex'}`}>
         {!call ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
             <div className="w-14 h-14 rounded-2xl bg-white/4 border border-white/8 flex items-center justify-center">
@@ -138,6 +139,13 @@ export default function PastCallsPage() {
           </div>
         ) : (
           <div className="space-y-0">
+            {/* Mobile back button */}
+            <button
+              onClick={() => setMobileView('list')}
+              className="md:hidden flex items-center gap-1.5 text-sm text-[#D4AF37] mb-4"
+            >
+              ← Back to calls
+            </button>
             {/* Header */}
             <div className="flex items-start justify-between mb-4">
               <div>
