@@ -88,7 +88,9 @@ function readStoredInterval(): number {
 const SILENCE_PEAK_THRESHOLD = 0.01;
 // Warn after this many consecutive silent heartbeat ticks (1 tick = 1 s)
 const SILENCE_WARNING_TICKS = 3;
-const MAX_RECONNECT = 5;
+const MAX_RECONNECT = 10;
+// Max blobs to queue during a reconnect gap (at 250ms each = ~5s of audio)
+const MAX_QUEUE_BLOBS = 20;
 
 let lineSeq = 0;
 function nextId() { return `dg-${++lineSeq}`; }
@@ -197,6 +199,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
   const reconnectAttemptRef = useRef(0);
+  // Audio blobs queued while WS is reconnecting — replayed after connection resumes
+  const audioQueueRef = useRef<Blob[]>([]);
   const usingWebSpeechRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   useEffect(() => { streamRef.current = audioManager.stream; }, [audioManager.stream]);
@@ -464,11 +468,19 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
 
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
-        // Record send timestamp for ws-rtt measurement
+        // Flush any queued blobs first (reconnect gap recovery)
+        if (audioQueueRef.current.length > 0) {
+          const queued = audioQueueRef.current.splice(0);
+          console.log(`[transcription] flushing ${queued.length} queued chunks after reconnect`);
+          queued.forEach((blob) => ws.send(blob));
+        }
         lastSentAtRef.current = Date.now();
         ws.send(e.data);
+      } else if (shouldReconnectRef.current) {
+        // Queue during reconnect — cap to avoid unbounded memory growth
+        audioQueueRef.current.push(e.data);
+        if (audioQueueRef.current.length > MAX_QUEUE_BLOBS) audioQueueRef.current.shift();
       }
-      // If WS is not yet open, the server buffers audio in audioQueue
     };
 
     recorder.onerror = (e) => {
@@ -606,7 +618,8 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
       if (reconnectAttemptRef.current < MAX_RECONNECT) {
         reconnectAttemptRef.current++;
         setConnectionState('reconnecting');
-        const delay = Math.min(500 * reconnectAttemptRef.current, 3000);
+        // True exponential backoff: 300ms, 600ms, 1.2s, 2.4s, 4.8s … capped at 8s
+        const delay = Math.min(300 * Math.pow(2, reconnectAttemptRef.current - 1), 8000);
         console.log(`[transcription] reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current}/${MAX_RECONNECT})`);
 
         if (recorderRef.current?.state !== 'inactive') {
@@ -744,6 +757,7 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const stopListening = useCallback(() => {
     console.log('[transcription] stopListening() — End Call');
     shouldReconnectRef.current = false;
+    audioQueueRef.current = [];
 
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);

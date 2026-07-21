@@ -43,6 +43,32 @@ export async function getMicPermissionState(): Promise<MicPermissionState> {
  * far-field speaker audio. autoGainControl stays on: it boosts quiet distant
  * audio and cancels nothing.
  */
+/**
+ * Returns true when the device label suggests it's an external / USB mic.
+ * Used to auto-switch when a higher-quality device is plugged in mid-call.
+ */
+export function isExternalMic(device: AudioInputDevice): boolean {
+  const l = device.label.toLowerCase();
+  if (l.includes('default') || l.includes('communications')) return false;
+  return (
+    l.includes('usb') ||
+    l.includes('headset') ||
+    l.includes('airpods') ||
+    l.includes('bluetooth') ||
+    l.includes('jabra') ||
+    l.includes('logitech') ||
+    l.includes('blue ') ||
+    l.includes('yeti') ||
+    l.includes('snowball') ||
+    l.includes('fifine') ||
+    l.includes('conference') ||
+    l.includes('webcam') ||
+    // not a built-in Intel / Realtek / Apple internal mic
+    (!l.includes('built-in') && !l.includes('internal') && !l.includes('intel') &&
+     !l.includes('smart sound') && !l.includes('realtek') && !l.includes('microphone array'))
+  );
+}
+
 export async function requestMicrophoneStream(deviceId?: string): Promise<MediaStream> {
   const constraints: MediaStreamConstraints = {
     audio: {

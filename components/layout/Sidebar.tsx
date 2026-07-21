@@ -35,6 +35,7 @@ const navSections = [
     items: [
       { href: '/learn-from-call', label: 'Learn From Call', icon: LearnIcon },
       { href: '/knowledge-base',  label: 'Knowledge',       icon: BookIcon },
+      { href: '/diagnostics',     label: 'Audio Diagnostics', icon: DiagnosticsIcon },
     ],
   },
 ];
@@ -343,6 +344,14 @@ function BookIcon({ active = false }: { active?: boolean }) {
   return (
     <svg className={ic(active)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+    </svg>
+  );
+}
+
+function DiagnosticsIcon({ active = false }: { active?: boolean }) {
+  return (
+    <svg className={ic(active)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
     </svg>
   );
 }

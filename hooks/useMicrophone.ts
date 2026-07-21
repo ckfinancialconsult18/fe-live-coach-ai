@@ -5,6 +5,7 @@ import {
   listAudioInputDevices,
   getMicPermissionState,
   requestMicrophoneStream,
+  isExternalMic,
   type AudioInputDevice,
   type MicPermissionState,
 } from '@/lib/audio/devices';
@@ -32,6 +33,11 @@ export interface UseMicrophoneReturn {
   start: () => Promise<MediaStream | null>;
   stop: () => void;
   error: string | null;
+  /** Set when a better mic is auto-connected mid-call. Cleared after display. */
+  hotPlugNotification: string | null;
+  clearHotPlugNotification: () => void;
+  /** Returns raw waveform data for canvas drawing (null if mic not active). */
+  getWaveform: () => Float32Array | null;
 }
 
 const SILENCE_TIMEOUT_MS = 8000;
@@ -45,8 +51,11 @@ export function useMicrophone(): UseMicrophoneReturn {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hotPlugNotification, setHotPlugNotification] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
+  const devicesRef = useRef<AudioInputDevice[]>([]);
+  const acquireRef = useRef<(deviceId?: string) => Promise<MediaStream | null>>(async () => null);
   const contextRef = useRef<AudioContext | null>(null);
   const meterRef = useRef<LevelMeter | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -55,6 +64,7 @@ export function useMicrophone(): UseMicrophoneReturn {
   const refreshDevices = useCallback(async () => {
     const list = await listAudioInputDevices();
     setDevices(list);
+    devicesRef.current = list;
     return list;
   }, []);
 
@@ -67,7 +77,19 @@ export function useMicrophone(): UseMicrophoneReturn {
       setDevices(list);
     })();
 
-    const onDeviceChange = () => refreshDevices();
+    const onDeviceChange = async () => {
+      const prevIds = new Set(devicesRef.current.map((d) => d.deviceId));
+      const newList = await refreshDevices();
+      // Auto-switch to a newly-connected external mic if a call is active
+      if (streamRef.current) {
+        const newExternal = newList.find((d) => !prevIds.has(d.deviceId) && isExternalMic(d));
+        if (newExternal) {
+          console.log('[microphone] hot-plug detected — switching to', newExternal.label);
+          await acquireRef.current(newExternal.deviceId);
+          setHotPlugNotification(`Switched to "${newExternal.label}"`);
+        }
+      }
+    };
     navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
     return () => {
       cancelled = true;
@@ -187,6 +209,8 @@ export function useMicrophone(): UseMicrophoneReturn {
     }
   }, [refreshDevices]);
 
+  useEffect(() => { acquireRef.current = acquire; }, [acquire]);
+
   const start = useCallback(() => acquire(selectedDeviceId ?? undefined), [acquire, selectedDeviceId]);
 
   const selectDevice = useCallback(async (deviceId: string) => {
@@ -203,6 +227,10 @@ export function useMicrophone(): UseMicrophoneReturn {
 
   useEffect(() => () => teardown(), [teardown]);
 
+  const getWaveform = useCallback((): Float32Array | null => {
+    return meterRef.current?.getWaveform() ?? null;
+  }, []);
+
   return {
     devices,
     selectedDeviceId,
@@ -215,5 +243,8 @@ export function useMicrophone(): UseMicrophoneReturn {
     start,
     stop,
     error,
+    hotPlugNotification,
+    clearHotPlugNotification: useCallback(() => setHotPlugNotification(null), []),
+    getWaveform,
   };
 }

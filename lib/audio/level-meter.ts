@@ -5,6 +5,8 @@ export interface LevelMeter {
   getPeak: () => number;
   /** True if the analyser has seen any non-silent samples since creation. */
   hasSignal: () => boolean;
+  /** Raw time-domain waveform data for canvas drawing. Returns a copy of the internal buffer. */
+  getWaveform: () => Float32Array;
   destroy: () => void;
 }
 
@@ -44,6 +46,10 @@ export function createLevelMeter(stream: MediaStream, audioContext: AudioContext
     getLevel: () => sample().rms,
     getPeak: () => sample().peak,
     hasSignal: () => everHadSignal,
+    getWaveform: () => {
+      analyser.getFloatTimeDomainData(buffer);
+      return buffer.slice();
+    },
     destroy: () => {
       try { source.disconnect(); } catch { /* already disconnected */ }
       try { analyser.disconnect(); } catch { /* already disconnected */ }
