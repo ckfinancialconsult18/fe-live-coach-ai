@@ -7,6 +7,12 @@ function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
+// API routes handle auth themselves via requireUser() and return 401 JSON.
+// Never redirect them to /login — that breaks fetch() callers.
+function isApiPath(pathname: string) {
+  return pathname.startsWith('/api/');
+}
+
 // Refreshes the Supabase session cookie on every request and redirects
 // unauthenticated users away from protected pages. Called from the root
 // middleware.ts.
@@ -38,7 +44,7 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && !isPublicPath(request.nextUrl.pathname)) {
+  if (!user && !isPublicPath(request.nextUrl.pathname) && !isApiPath(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', request.nextUrl.pathname);
