@@ -903,6 +903,21 @@ function PostCallReportView({ report, transcript, loading, error, onClose, durat
             </button>
           </div>
         </div>
+        {/* ── Focus for Your Next Call ──────────────────────────────────── */}
+        {threeBiggestImprovements.length > 0 && (
+          <div className="mx-6 rounded-2xl p-5" style={{ background: 'rgba(212,175,55,0.07)', border: '1px solid rgba(212,175,55,0.3)' }}>
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: '#D4AF37' }}>
+              🎯 Focus for Your Next Call
+            </p>
+            <p className="text-sm text-slate-100 leading-relaxed font-medium">{threeBiggestImprovements[0]}</p>
+            {threeBiggestImprovements.length > 1 && (
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                Also: {threeBiggestImprovements.slice(1).join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Metric chips */}
         <div className="flex flex-wrap gap-2">
           {[
