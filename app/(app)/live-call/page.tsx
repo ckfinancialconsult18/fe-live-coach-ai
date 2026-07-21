@@ -144,6 +144,7 @@ function LiveCallPageInner() {
   const [postCallError, setPostCallError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [rightTab, setRightTab] = useState<'stage' | 'uw' | 'discovery' | 'memory' | 'score' | 'coach' | 'close'>('stage');
+  const [mobilePanelTab, setMobilePanelTab] = useState<'transcript' | 'script' | 'tools'>('transcript');
   const [objectionCount, setObjectionCount] = useState(0);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [momentum, setMomentum] = useState(0);
@@ -606,8 +607,8 @@ function LiveCallPageInner() {
         </div>
       )}
 
-      {/* Main 3-column workspace */}
-      <div className="flex flex-1 min-h-0 divide-x divide-white/6">
+      {/* Main 3-column workspace — desktop only */}
+      <div className="hidden md:flex flex-1 min-h-0 divide-x divide-white/6">
 
         {/* LEFT — Transcript (35%) */}
         <div className="flex flex-col w-[35%] min-w-0">
@@ -720,6 +721,131 @@ function LiveCallPageInner() {
               <LiveClosingPanel state={liveClosingState} isAnalyzing={isAnalyzing} />
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Mobile single-panel workspace */}
+      <div className="flex md:hidden flex-col flex-1 min-h-0">
+        {/* Mobile panel tab bar */}
+        <div className="flex shrink-0 border-b border-white/6">
+          {([
+            { key: 'transcript', label: '📝 Transcript' },
+            { key: 'script',     label: '🎯 Script' },
+            { key: 'tools',      label: '🎛 Tools' },
+          ] as const).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setMobilePanelTab(key)}
+              className={`flex-1 py-2.5 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+                mobilePanelTab === key
+                  ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Mobile panel content */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {mobilePanelTab === 'transcript' && (
+            <LiveTranscript lines={transcript} partial={partial} isListening={isListening} onCorrectSpeaker={correctSpeaker} onSwapSpeakers={swapSpeakers} />
+          )}
+          {mobilePanelTab === 'script' && (
+            <div className="flex flex-col h-full">
+              <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/6 shrink-0">
+                {(['script', 'coach'] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => switchCenterView(v)}
+                    className={`flex-1 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                      centerView === v
+                        ? 'bg-[rgba(212,175,55,0.12)] text-[#D4AF37] border border-[rgba(212,175,55,0.3)]'
+                        : 'text-slate-600 hover:text-slate-400 border border-transparent'
+                    }`}
+                  >
+                    {v === 'script' ? '🎯 Script Follow' : '🤖 Classic Coach'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {centerView === 'script' ? (
+                  <ScriptFollowPanel
+                    stage={stage}
+                    insight={insight}
+                    checklist={checklist}
+                    isAnalyzing={isAnalyzing}
+                    isInterimCoaching={isInterimCoaching}
+                    ragSources={ragSources}
+                    transcript={transcript}
+                    onStageSelect={setStage}
+                  />
+                ) : (
+                  <AICoachPanel insight={insight} isAnalyzing={isAnalyzing} isInterimCoaching={isInterimCoaching} ragSources={ragSources} />
+                )}
+              </div>
+            </div>
+          )}
+          {mobilePanelTab === 'tools' && (
+            <div className="flex flex-col h-full">
+              <div className="flex border-b border-white/6 shrink-0 overflow-x-auto">
+                {(['stage', 'uw', 'discovery', 'memory', 'score', 'coach', 'close'] as const).map((tab) => {
+                  const hasActiveObjection = tab === 'coach' && (liveObjectionState.primary !== null || liveObjectionState.additional.length > 0);
+                  const TAB_LABEL: Record<string, string> = {
+                    stage: 'Stage', uw: 'U/W', discovery: 'Disc', memory: 'Mem',
+                    score: 'Score', coach: 'Coach', close: 'Close',
+                  };
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setRightTab(tab)}
+                      className={`relative shrink-0 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                        rightTab === tab
+                          ? 'text-[#D4AF37] border-b-2 border-[#D4AF37]'
+                          : 'text-slate-600 hover:text-slate-400'
+                      }`}
+                    >
+                      {TAB_LABEL[tab]}
+                      {hasActiveObjection && (
+                        <span className="absolute top-1 right-0.5 w-1.5 h-1.5 rounded-full bg-red-400" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {rightTab === 'stage' && (
+                  <div className="flex flex-col divide-y divide-white/6">
+                    <CallStagePanel currentStage={stage} checklist={checklist} nextBestAction={insight.nextBestAction} />
+                    <MetricsPanel
+                      talkPct={talkPct}
+                      listenPct={listenPct}
+                      sentimentScore={Math.round(metrics.sentimentScore)}
+                      connectionScore={Math.round(metrics.connectionScore)}
+                      energyScore={Math.round(metrics.energyScore)}
+                      confidenceScore={Math.round(metrics.confidenceScore)}
+                      momentumScore={Math.round(momentum)}
+                    />
+                  </div>
+                )}
+                {rightTab === 'uw' && <LiveCarrierPanel carriers={carriers} underwriting={underwriting} carrierPortals={carrierPortals} />}
+                {rightTab === 'discovery' && <MissedOpportunityPanel state={missedOpportunities} isAnalyzing={isAnalyzing} />}
+                {rightTab === 'memory' && (
+                  <div className="p-3 space-y-3">
+                    <MidCallMemoryPanel memory={memory} />
+                    <div className="glass-card rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Call Timeline</p>
+                      <CallTimeline events={timeline} />
+                    </div>
+                  </div>
+                )}
+                {rightTab === 'score' && <LiveSalesScorePanel scores={liveScores} isAnalyzing={isAnalyzing} />}
+                {rightTab === 'coach' && <LiveObjectionPanel state={liveObjectionState} callStartMs={callStartMs} />}
+                {rightTab === 'close' && <LiveClosingPanel state={liveClosingState} isAnalyzing={isAnalyzing} />}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
