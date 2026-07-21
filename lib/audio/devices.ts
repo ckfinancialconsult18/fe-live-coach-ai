@@ -31,19 +31,6 @@ export async function getMicPermissionState(): Promise<MicPermissionState> {
 }
 
 /**
- * Requests a microphone stream tuned for this app's core use case: a laptop
- * mic picking up BOTH the agent's voice AND the phone call playing through the
- * computer's speakers.
- *
- * echoCancellation and noiseSuppression MUST be off here. The echo canceller
- * treats any audio coming out of the speakers as echo and subtracts it from
- * the mic signal — it erases the remote party's voice entirely — and its
- * half-duplex ducking suppresses the mic while speaker audio plays, so during
- * a call almost nothing survives. noiseSuppression similarly attenuates
- * far-field speaker audio. autoGainControl stays on: it boosts quiet distant
- * audio and cancels nothing.
- */
-/**
  * Returns true when the device label suggests it's an external / USB mic.
  * Used to auto-switch when a higher-quality device is plugged in mid-call.
  */
@@ -69,20 +56,36 @@ export function isExternalMic(device: AudioInputDevice): boolean {
   );
 }
 
-export async function requestMicrophoneStream(deviceId?: string): Promise<MediaStream> {
+/**
+ * Requests a microphone stream tuned for this app's use case: capturing BOTH
+ * the agent's voice AND the prospect's voice bleeding from the phone speaker.
+ *
+ * echoCancellation and noiseSuppression are always OFF — they would erase the
+ * prospect's voice (EC treats speaker audio as echo to subtract; NS attenuates
+ * far-field audio).
+ *
+ * autoGainControl is ON for external/USB mics (boosts the quiet phone-speaker
+ * bleed without adding noise floor artifacts) and OFF for built-in Intel mics
+ * (AGC amplifies their noisy noise floor, producing static).
+ */
+export async function requestMicrophoneStream(
+  deviceId?: string,
+  device?: AudioInputDevice,
+): Promise<MediaStream> {
+  const external = device ? isExternalMic(device) : false;
   const constraints: MediaStreamConstraints = {
     audio: {
       deviceId: deviceId ? { exact: deviceId } : undefined,
       echoCancellation: false,
       noiseSuppression: false,
-      autoGainControl: false,
+      autoGainControl: external,
       channelCount: 1,
     },
     video: false,
   };
   const stream = await navigator.mediaDevices.getUserMedia(constraints);
   const settings = stream.getAudioTracks()[0]?.getSettings() ?? {};
-  console.log('[microphone] stream acquired — applied settings:', JSON.stringify({
+  console.log('[microphone] stream acquired —', external ? 'external mic (AGC on)' : 'built-in mic (AGC off)', '— settings:', JSON.stringify({
     deviceId: settings.deviceId,
     echoCancellation: settings.echoCancellation,
     noiseSuppression: settings.noiseSuppression,

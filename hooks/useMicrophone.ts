@@ -116,7 +116,8 @@ export function useMicrophone(): UseMicrophoneReturn {
   const acquire = useCallback(async (deviceId?: string): Promise<MediaStream | null> => {
     setError(null);
     try {
-      const newStream = await requestMicrophoneStream(deviceId);
+      const device = deviceId ? devicesRef.current.find((d) => d.deviceId === deviceId) : undefined;
+      const newStream = await requestMicrophoneStream(deviceId, device);
       setPermissionState('granted');
 
       // Stop the previous stream only after the new one succeeds, so a
