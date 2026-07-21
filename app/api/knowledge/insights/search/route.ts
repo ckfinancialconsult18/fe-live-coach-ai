@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 import { logPipelineEvent } from '@/lib/monitoring/log';
@@ -30,14 +30,14 @@ export async function GET(request: NextRequest) {
   let query = supabase.from('knowledge_base').select('*', { count: 'exact' }).order('created_at', { ascending: false });
   // knowledge_base's full-text index (migration 12) is a functional index,
   // not a generated column, so PostgREST .textSearch() can't target it
-  // directly — fall back to ILIKE across the searchable fields.
+  // directly â€” fall back to ILIKE across the searchable fields.
   if (q.trim()) query = query.or(`summary.ilike.%${q}%,content.ilike.%${q}%,evidence.ilike.%${q}%`);
   if (status) query = query.eq('status', status as never);
   if (type) query = query.eq('type', type as never);
 
   const from = (page - 1) * pageSize;
   const { data, error, count } = await query.range(from, from + pageSize - 1);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const terms = q.split(/\s+/).filter(Boolean);
   const results: SearchResult[] = (data ?? []).map((row) => {

@@ -1,7 +1,7 @@
-/**
- * POST — create an invite link (owner only)
- * GET  — validate an invite token (anyone authenticated)
- * PUT  — accept an invite (authenticated user, not already in an agency)
+﻿/**
+ * POST â€” create an invite link (owner only)
+ * GET  â€” validate an invite token (anyone authenticated)
+ * PUT  â€” accept an invite (authenticated user, not already in an agency)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     .select('token, expires_at, email')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
   return NextResponse.json({

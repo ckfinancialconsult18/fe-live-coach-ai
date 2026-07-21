@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser, requireFields, handleApiError, logAudit } from '@/lib/api/guard';
 import type { ApproveAction } from '@/lib/pipeline/types';
@@ -25,9 +25,9 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .select('id');
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
-    // Approved entries become retrievable — enqueue them for chunking/embedding.
+    // Approved entries become retrievable â€” enqueue them for chunking/embedding.
     if (status === 'approved' && updated) {
       const queueRows = updated.map((row) => ({ user_id: user.id, target_type: 'knowledge_base' as const, target_id: row.id }));
       await supabase.from('embedding_queue').insert(queueRows as never);

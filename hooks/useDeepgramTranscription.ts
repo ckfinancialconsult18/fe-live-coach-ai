@@ -92,8 +92,10 @@ const MAX_RECONNECT = 10;
 // Max blobs to queue during a reconnect gap (at 250ms each = ~5s of audio)
 const MAX_QUEUE_BLOBS = 20;
 
-let lineSeq = 0;
-function nextId() { return `dg-${++lineSeq}`; }
+function makeNextId() {
+  let seq = 0;
+  return () => `dg-${++seq}`;
+}
 
 // ── Deepgram word type ────────────────────────────────────────────────────────
 
@@ -174,6 +176,7 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramTranscriptionReturn {
+  const nextId = useRef(makeNextId()).current;
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [partial, setPartial] = useState<PartialTranscript | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -817,7 +820,6 @@ export function useDeepgramTranscription(mic: UseMicrophoneReturn): UseDeepgramT
   const clearTranscript = useCallback(() => {
     setTranscript([]);
     setPartial(null);
-    lineSeq = 0;
   }, []);
 
   // Flip agent/prospect for the whole call: retroactively on every existing

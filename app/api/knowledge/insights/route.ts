@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 import type { PendingEntryIndex, PendingKnowledgeEntry } from '@/lib/pipeline/types';
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   const from = (page - 1) * pageSize;
   const { data, error, count } = await query.range(from, from + pageSize - 1);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const entries: PendingEntryIndex[] = (data ?? []).map((row) => ({
     id: row.id,

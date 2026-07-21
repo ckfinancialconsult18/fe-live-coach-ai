@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 
 export async function GET() {
@@ -10,7 +10,7 @@ export async function GET() {
     .select('*, carriers(name), knowledge_categories(name)')
     .order('created_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const documents = (data ?? []).map((d) => ({
     id: d.id,

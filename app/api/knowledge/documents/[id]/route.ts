@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser, logAudit } from '@/lib/api/guard';
 
@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   return NextResponse.json(data);
 }
 
@@ -73,7 +73,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
 
   // knowledge_chunks and embedding_queue rows cascade via FK on document_id.
   const { error } = await supabase.from('knowledge_documents').delete().eq('id', id).eq('user_id', user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   await logAudit(supabase, { userId: user.id, action: 'knowledge.delete', entityType: 'knowledge_document', entityId: id });
   return NextResponse.json({ success: true });

@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireUser } from '@/lib/api/guard';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const { data: call, error } = await supabase
     .from('calls')
@@ -14,7 +13,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .eq('user_id', user.id)
     .single();
 
-  if (error || !call) return NextResponse.json({ error: error?.message ?? 'Not found' }, { status: 404 });
+  if (error || !call) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const score = Array.isArray(call.call_scores) ? call.call_scores[0] : null;
   return NextResponse.json({
@@ -37,9 +36,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { supabase, user, response } = await requireUser();
+  if (!user) return response;
 
   const { error } = await supabase
     .from('calls')
@@ -47,6 +45,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     .eq('id', id)
     .eq('user_id', user.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Failed to delete call' }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

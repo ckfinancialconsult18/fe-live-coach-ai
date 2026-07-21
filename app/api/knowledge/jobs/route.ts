@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 import type { PipelineJob } from '@/lib/pipeline/types';
 
@@ -12,7 +12,7 @@ export async function GET() {
     .order('created_at', { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const jobs: PipelineJob[] = (data ?? []).map((row) => ({
     id: row.id,

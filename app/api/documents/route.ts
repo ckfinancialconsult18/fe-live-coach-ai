@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser, logAudit } from '@/lib/api/guard';
 import { MAX_FILE_SIZE_BYTES, isAllowedMimeType, DOCUMENT_CATEGORIES } from '@/lib/documents/constants';
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   query = query.range(from, from + pageSize - 1);
 
   const { data, error, count } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   const documents = (data ?? []).map((d: any) => ({
     id: d.id,
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (dup) {
       return NextResponse.json(
-        { error: `Duplicate file — identical content already uploaded as "${dup.name}"`, duplicateOf: dup.id },
+        { error: `Duplicate file â€” identical content already uploaded as "${dup.name}"`, duplicateOf: dup.id },
         { status: 409 }
       );
     }
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
 
   if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 });
 
-  // scan_status stays 'pending' — actual virus-scan integration (e.g. ClamAV
+  // scan_status stays 'pending' â€” actual virus-scan integration (e.g. ClamAV
   // via an edge function, or a third-party API) is not wired up; this column
   // is the hook point for that integration.
 

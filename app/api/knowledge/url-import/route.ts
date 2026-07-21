@@ -1,4 +1,4 @@
-export const runtime = 'nodejs';
+﻿export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   await db.from('embedding_queue').insert({
     user_id: user.id,

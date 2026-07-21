@@ -4,10 +4,17 @@
     {
       "name": "fe-live-coach-ai",
       "runtimeExecutable": "C:\\projects\\FE-Live-Coach-AI\\node.exe",
-      "runtimeArgs": ["C:\\project\\fe-live-coach-ai\\node_modules\\next\\dist\\bin\\next", "dev"],
+      "runtimeArgs": ["C:\\project\\fe-live-coach-ai\\node_modules\\tsx\\dist\\cli.mjs", "C:\\project\\fe-live-coach-ai\\server.ts"],
+      "cwd": "C:\\project\\fe-live-coach-ai",
       "env": { "PATH": "C:\\projects\\FE-Live-Coach-AI;C:\\Windows\\system32;C:\\Windows" },
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "ck-life-group",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\project\\ck-life-group", "run", "dev"],
+      "port": 5173
     }
   ]
 }

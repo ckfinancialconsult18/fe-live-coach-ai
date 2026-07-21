@@ -27,8 +27,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const transcriptLen = Array.isArray(body.transcript) ? (body.transcript as unknown[]).length : 'n/a';
-  console.log('[autosave] PATCH — callId:', id, '| userId:', user.id, '| transcriptLines:', transcriptLen, '| fields:', Object.keys(update).join(','));
-
   const { error, count } = await supabase
     .from('calls')
     .update(update as never)
@@ -37,10 +35,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     .eq('status', 'in_progress');
 
   if (error) {
-    console.error('[autosave] UPDATE failed — callId:', id, '| code:', error.code, '| msg:', error.message, '| details:', error.details);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[autosave] UPDATE failed — callId:', id, '| code:', error.code);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 
-  console.log('[autosave] UPDATE succeeded — callId:', id, '| rowsAffected:', count ?? 'unknown');
+  void count;
   return NextResponse.json({ saved: true, at: new Date().toISOString() });
 }

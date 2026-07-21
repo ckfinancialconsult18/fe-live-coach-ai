@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 export type GoalType =
@@ -82,7 +82,7 @@ export async function GET() {
 
   const todayCallCount = (todayCalls ?? []).length;
   const todayPolicies = (todayCalls ?? []).filter((c: { outcome: string }) => c.outcome === 'policy_written').length;
-  const todayAppsSubmitted = todayPolicies; // applications ≈ policies for FE insurance (same event)
+  const todayAppsSubmitted = todayPolicies; // applications â‰ˆ policies for FE insurance (same event)
   const todayAppointments = (todayAppts ?? []).length;
 
   const totalCalls30 = calls30.length;
@@ -137,7 +137,7 @@ export async function GET() {
       goalType === 'avg_rapport_score' ? 'rapport' : undefined
     );
     const delta = current - prevAvg; // change per 14 days
-    if (delta <= 0) return null; // not improving — no projection
+    if (delta <= 0) return null; // not improving â€” no projection
 
     const needed = target - current;
     const daysToGoal = Math.ceil((needed / delta) * 14);
@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
     target: body.target,
   }, { onConflict: 'user_id,goal_type' }).select().single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   return NextResponse.json(data);
 }
 

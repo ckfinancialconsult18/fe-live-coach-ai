@@ -1,7 +1,7 @@
-/**
- * GET  — return the calling user's agency context (their agency if owner, or
+﻿/**
+ * GET  â€” return the calling user's agency context (their agency if owner, or
  *         the agency they belong to as an agent)
- * POST — create a new agency (makes caller the owner + adds them as owner member)
+ * POST â€” create a new agency (makes caller the owner + adds them as owner member)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     .insert({ name: body.name.trim(), owner_id: user.id })
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 
   // Add owner as member
   await db.from('agency_members').insert({
@@ -70,6 +70,6 @@ export async function DELETE() {
     .delete()
     .eq('owner_id', user.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

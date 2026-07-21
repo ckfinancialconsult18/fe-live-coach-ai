@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { requireUser } from '@/lib/api/guard';
 
@@ -14,6 +14,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .eq('user_id', user.id)
     .order('version', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   return NextResponse.json({ versions: data ?? [] });
 }
