@@ -9,11 +9,34 @@ try {
   supabaseHostname = undefined;
 }
 
+// Deepgram and OpenAI Realtime are proxied through the server — no direct
+// browser connections needed. Only 'self' required for WebSockets.
+const CSP = [
+  "default-src 'self'",
+  // Next.js requires unsafe-inline for App Router script injection (no nonce middleware).
+  // unsafe-eval is required by Turbopack in production.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+  "style-src 'self' 'unsafe-inline'",
+  // next/font/google self-hosts fonts — no external font CDN needed.
+  "font-src 'self' data:",
+  // Supabase storage for user avatars; blob: for audio recording previews.
+  "img-src 'self' data: blob: https://*.supabase.co https://*.supabase.in",
+  // API calls and WebSocket proxy (all browser WS goes to same origin via server.ts).
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://o4511785348628480.ingest.us.sentry.io",
+  // Stripe Checkout / 3DS iframes.
+  "frame-src https://js.stripe.com https://hooks.stripe.com",
+  // MediaRecorder produces blob: URLs; service workers need worker-src.
+  "worker-src 'self' blob:",
+  "media-src 'self' blob:",
+].join('; ');
+
 const securityHeaders = [
   { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  { key: 'Content-Security-Policy', value: CSP },
 ];
 
 /** @type {import('next').NextConfig} */
