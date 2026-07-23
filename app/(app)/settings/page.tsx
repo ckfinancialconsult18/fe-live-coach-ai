@@ -299,7 +299,7 @@ function ProfileTab() {
       <h2 className="text-lg font-semibold text-slate-100">Profile Settings</h2>
 
       {/* Photo uploads */}
-      <div className="flex items-start gap-8">
+      <div className="flex items-start gap-8 flex-wrap">
         <AvatarUpload
           currentUrl={avatarUrl}
           label="Profile photo"
@@ -321,7 +321,7 @@ function ProfileTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input label="First Name" value={form.firstName} onChange={set('firstName')} placeholder="First name" />
         <Input label="Last Name"  value={form.lastName}  onChange={set('lastName')}  placeholder="Last name" />
         <Input label="Email" type="email" value={email} disabled placeholder="you@agency.com"
@@ -380,7 +380,7 @@ function AgencyTab() {
   return (
     <div className="glass-card rounded-2xl p-6 space-y-6">
       <h2 className="text-lg font-semibold text-slate-100">Agency Settings</h2>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input label="Agency Name"  value={form.agencyName}  onChange={set('agencyName')}  placeholder="Agency name"         className="col-span-2" />
         <Input label="Agency Phone" value={form.agencyPhone} onChange={set('agencyPhone')} placeholder="(555) 000-0000" />
         <Input label="Agency Email" value={form.agencyEmail} onChange={set('agencyEmail')} placeholder="info@agency.com" />
@@ -439,7 +439,7 @@ function AiPreferencesTab() {
       <div className="space-y-5">
         <div>
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Coaching Style</label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {(['balanced', 'supportive', 'direct'] as const).map((style) => (
               <button
                 key={style}
@@ -463,7 +463,7 @@ function AiPreferencesTab() {
 
         <div>
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Response Detail</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {(['concise', 'detailed'] as const).map((detail) => (
               <button
                 key={detail}
@@ -815,7 +815,7 @@ function BillingTab() {
               <p className="text-sm text-amber-400 font-medium">7-day free trial included</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(['professional', 'agency'] as PlanId[]).map((pid) => {
                 const pd = PLAN_DETAILS[pid];
                 return (

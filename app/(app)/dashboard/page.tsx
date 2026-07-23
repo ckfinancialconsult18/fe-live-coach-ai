@@ -130,7 +130,7 @@ export default async function DashboardPage() {
       </Link>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {kpis.map((k, i) => {
           const Icon = k.icon;
           return (
@@ -208,7 +208,7 @@ export default async function DashboardPage() {
                   </div>
                 ))}
               </div>
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/6 text-xs">
+              <div className="flex items-center justify-between flex-wrap gap-y-1 mt-4 pt-3 border-t border-white/6 text-xs">
                 <span className="text-slate-500">This week <span className="font-bold text-slate-300">{avg7 ?? '—'}%</span></span>
                 <span className="text-slate-500">Prior week <span className="font-bold text-slate-300">{avgPrev7 ?? '—'}%</span></span>
                 {delta !== null && (

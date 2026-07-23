@@ -207,7 +207,7 @@ function OverviewTab({ win }: { win: Window }) {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard label="Calls Analyzed" value={String(data.callCount)} sub={`Last ${win} days`} color="#D4AF37" />
         <KpiCard label="Avg Score" value={data.avgOverall !== null ? String(data.avgOverall) : '—'} sub={data.avgOverall !== null ? (data.avgOverall >= 80 ? 'Excellent' : data.avgOverall >= 65 ? 'Good' : 'Needs work') : 'No data'} color={data.avgOverall !== null ? scoreColor(data.avgOverall) : '#64748b'} />
         <KpiCard label="Strongest Skill" value={topStage?.label ?? '—'} sub={topStage ? `Avg ${topStage.avg}` : 'No data'} color="#22c55e" small />
@@ -352,7 +352,7 @@ function BriefTab({ win }: { win: Window }) {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard label="Avg Score" value={data.currentAvg !== null ? String(data.currentAvg) : '—'} sub={data.trendDelta !== null ? `${data.trendDelta > 0 ? '+' : ''}${data.trendDelta} vs prev period` : 'First period'} color={data.currentAvg !== null ? scoreColor(data.currentAvg) : '#64748b'} />
         <KpiCard label="Trend" value={data.trendDirection === 'up' ? 'Improving' : data.trendDirection === 'down' ? 'Declining' : data.trendDirection === 'flat' ? 'Steady' : '—'} sub={data.trendDelta !== null ? `${Math.abs(data.trendDelta)} pts` : 'No comparison'} color={trendColor} small />
         <KpiCard label="Strongest Skill" value={data.strongestSkill?.label ?? '—'} sub={data.strongestSkill ? `${data.strongestSkill.avg}/100` : ''} color="#22c55e" small />
@@ -633,12 +633,12 @@ function GoalsTab() {
       {streaks && (
         <div className="glass-card rounded-2xl p-5">
           <h3 className="text-sm font-semibold text-slate-200 mb-4">Streaks &amp; Activity</h3>
-          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
             <StreakCard label="Call streak" current={streaks.consecutiveCallDays} best={streaks.longestCallStreak} unit="days" color="#D4AF37" />
             <StreakCard label="High-score streak" current={streaks.consecutiveHighScoreDays} best={streaks.longestHighScoreStreak} unit="days" color="#22c55e" />
             <StreakCard label="Improvement streak" current={streaks.currentImprovementStreak} best={streaks.longestImprovementStreak} unit="days" color="#a78bfa" />
           </div>
-          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <div className="rounded-xl p-4 bg-white/3 border border-white/6">
               <p className="text-[11px] text-slate-500 mb-1">Calls this week</p>
               <p className="text-2xl font-bold text-[#D4AF37]">{streaks.callsThisWeek}</p>

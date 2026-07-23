@@ -900,14 +900,16 @@ export default function KnowledgeBasePage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit">
-        {tabs.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab === t.id ? 'bg-white/15 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}>
-            {t.icon}
-            {t.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto -mx-1 px-1">
+        <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit min-w-full sm:min-w-0">
+          {tabs.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${tab === t.id ? 'bg-white/15 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}>
+              {t.icon}
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab panels */}
