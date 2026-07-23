@@ -26,8 +26,9 @@ const navSections = [
   {
     title: 'Insights',
     items: [
-      { href: '/reports', label: 'Reports', icon: ChartBarIcon },
-      { href: '/agency',  label: 'Agency',  icon: AgencyIcon },
+      { href: '/performance', label: 'Performance', icon: PerformanceIcon },
+      { href: '/reports',     label: 'Reports',     icon: ChartBarIcon },
+      { href: '/agency',      label: 'Agency',      icon: AgencyIcon },
     ],
   },
   {

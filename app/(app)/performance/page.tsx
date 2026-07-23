@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Window = '7' | '30' | '90';
-type Tab = 'overview' | 'brief' | 'coaching' | 'goals' | 'insights' | 'trends' | 'achievements' | 'team';
+type Tab = 'overview' | 'brief' | 'coaching' | 'goals' | 'insights' | 'trends' | 'achievements' | 'team' | 'analytics';
 
 interface StageRanking {
   key: string; label: string; avg: number | null; callCount: number; trend: 'up' | 'down' | 'flat';
@@ -140,6 +141,7 @@ export default function PerformancePage() {
     { id: 'insights',     label: 'Insights' },
     { id: 'trends',       label: 'Trends' },
     { id: 'achievements', label: 'Achievements' },
+    { id: 'analytics',    label: 'Analytics' },
   ];
   const tabs = isOwner ? [...baseTabs, { id: 'team' as Tab, label: 'Team' }] : baseTabs;
 
@@ -183,6 +185,7 @@ export default function PerformancePage() {
       {tab === 'trends'       && <TrendsTab win={win} />}
       {tab === 'achievements' && <AchievementsTab />}
       {tab === 'team'         && <AgencyTeamTab />}
+      {tab === 'analytics'    && <AnalyticsTab />}
     </div>
   );
 }
@@ -1167,6 +1170,90 @@ function KpiCard({ label, value, sub, color, small }: { label: string; value: st
       <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{label}</p>
       <p className={`font-bold leading-tight ${small ? 'text-base' : 'text-3xl'}`} style={{ color }}>{value}</p>
       <p className="text-[11px] text-slate-500 mt-1">{sub}</p>
+    </div>
+  );
+}
+
+const STAGE_KEYS = [
+  ['introduction', 'Introduction'], ['permission', 'Permission'], ['discovery', 'Discovery'],
+  ['existingCoverage', 'Existing Coverage'], ['health', 'Health'], ['budget', 'Budget'],
+  ['presentation', 'Presentation'], ['objections', 'Objections'], ['closing', 'Close'],
+] as const;
+
+function AnalyticsTab() {
+  const [stageScores, setStageScores] = useState<{ stage: string; score: number; hasData: boolean }[]>([]);
+  const [topObjections, setTopObjections] = useState<{ label: string; count: number; pct: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+    supabase.from('call_scores').select('scores, objections').gte('created_at', since.toISOString())
+      .then(({ data }) => {
+        const rows = data ?? [];
+        const scores = STAGE_KEYS.map(([key, label]) => {
+          const vals = rows.map((r) => (r.scores as Record<string, number> | null)?.[key]).filter((v): v is number => typeof v === 'number');
+          return { stage: label, score: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0, hasData: vals.length > 0 };
+        });
+        const objMap = new Map<string, number>();
+        rows.forEach((r) => (r.objections ?? []).forEach((o: string) => objMap.set(o, (objMap.get(o) ?? 0) + 1)));
+        const max = Math.max(1, ...Array.from(objMap.values()));
+        const objs = Array.from(objMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([label, count]) => ({ label, count, pct: Math.round((count / max) * 100) }));
+        setStageScores(scores);
+        setTopObjections(objs);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-[#D4AF37]/30 border-t-[#D4AF37] animate-spin" /></div>;
+
+  const sc = (s: number) => s >= 80 ? '#22c55e' : s >= 65 ? '#D4AF37' : '#ef4444';
+  const weakest = stageScores.filter((s) => s.hasData).sort((a, b) => a.score - b.score)[0];
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-slate-500">AI-powered performance insights — last 30 days</p>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="glass-card rounded-2xl p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-slate-200">Average Score by Call Stage</h3>
+          <p className="text-xs text-slate-500">Identify exactly where you lose momentum</p>
+          <div className="space-y-3">
+            {stageScores.map((s) => (
+              <div key={s.stage}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-400">{s.stage}</span>
+                  <span className="text-xs font-bold" style={{ color: sc(s.score) }}>{s.hasData ? s.score : '—'}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/5">
+                  <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${s.score}%`, background: s.score >= 80 ? '#22c55e' : s.score >= 65 ? 'linear-gradient(90deg,#9a7a0a,#D4AF37)' : '#ef4444' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          {weakest ? <p className="text-[10px] text-amber-400 pt-2 border-t border-white/6">⚡ {weakest.stage} needs the most work ({weakest.score}). Focus role play sessions here.</p>
+            : <p className="text-xs text-slate-600 text-center py-2">No scored calls in the last 30 days</p>}
+        </div>
+        <div className="glass-card rounded-2xl p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-slate-200">Top Objections</h3>
+          <p className="text-xs text-slate-500">Frequency over the last 30 days</p>
+          <div className="space-y-4">
+            {topObjections.map((o) => (
+              <div key={o.label} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-300">{o.label}</span>
+                  <span className="text-[10px] text-slate-500">{o.count}x</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/5">
+                  <div className="h-1.5 rounded-full bg-red-500/60" style={{ width: `${o.pct}%` }} />
+                </div>
+              </div>
+            ))}
+            {topObjections.length === 0 && <p className="text-xs text-slate-600 text-center py-2">No objections logged in the last 30 days</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
