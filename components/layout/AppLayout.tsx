@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
 import { LiveCallBridgeProvider } from '@/lib/live-call-bridge';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -45,7 +46,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <TopNav onMenuToggle={() => setMobileOpen((o) => !o)} />
           <main className={`flex-1 min-h-0 ${isLivePage ? 'overflow-hidden' : 'overflow-y-auto p-5'}`}>
-            {children}
+            <ErrorBoundary>{children}</ErrorBoundary>
           </main>
         </div>
       </div>
