@@ -900,7 +900,8 @@ export default function KnowledgeBasePage() {
       </div>
 
       {/* Tab bar */}
-      <div className="overflow-x-auto -mx-1 px-1">
+      <div className="relative overflow-x-auto -mx-1 px-1">
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-[#090d18] to-transparent sm:hidden z-10" />
         <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit min-w-full sm:min-w-0">
           {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}

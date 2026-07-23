@@ -218,7 +218,7 @@ export default function LearnFromCallPage() {
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/6 border border-white/8 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 transition-colors shrink-0"
               >
                 <UploadIcon />
-                Upload .txt / .md
+                <span className="hidden sm:inline">Upload .txt / .md</span>
               </button>
               <input ref={fileInputRef} type="file" accept=".txt,.md,.text" className="hidden" onChange={handleFile} />
             </div>
