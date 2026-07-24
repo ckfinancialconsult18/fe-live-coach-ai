@@ -68,7 +68,9 @@ type ClientMsg =
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DG_STREAMING_URL = 'wss://api.deepgram.com/v1/listen';
-const DG_MODELS = ['nova-3', 'nova-2', 'nova-2-general', 'base'];
+// nova-2 first: it has the most reliable streaming diarization.
+// nova-3 stays in fallback for general transcription if nova-2 errors.
+const DG_MODELS = ['nova-2', 'nova-3', 'nova-2-general', 'base'];
 const MAX_AUDIO_BUFFER_BYTES = 5 * 1024 * 1024;
 
 const AUTH_TIMEOUT_MS   = 5_000;   // close if no auth within 5s
@@ -288,6 +290,17 @@ export async function handleTranscribeWs(
 
       const alt = event.channel?.alternatives?.[0];
       if (!alt?.transcript?.trim()) return;
+
+      // Log speaker distribution on every final so we can verify diarization
+      // is working in Railway logs (speaker numbers should vary between turns).
+      if (event.is_final) {
+        const dist: Record<number, number> = {};
+        for (const w of (alt.words ?? [])) {
+          const s = w.speaker ?? -1;
+          dist[s] = (dist[s] ?? 0) + 1;
+        }
+        console.log(`[transcribe-ws] final — userId=${userId} speakers=${JSON.stringify(dist)} text="${alt.transcript.slice(0, 60)}"`);
+      }
 
       sendToClient(clientWs, {
         type: event.is_final === true ? 'final' : 'interim',
